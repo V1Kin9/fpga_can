@@ -6,6 +6,8 @@ build/
 xsim.dir/
 *.wdb
 *.pb
+__pycache__/
+*.pyc
 *.cache/
 *.runs/
 *.sim/

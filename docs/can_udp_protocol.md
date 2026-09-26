@@ -1,6 +1,6 @@
 # FCAN UDP payload protocol
 
-This document defines the byte contract between the FPGA CAN capture pipeline and a future UDP/IP transmitter. The current RTL produces the **UDP payload only**; Ethernet, IPv4, UDP headers, RGMII timing and RTL8211E PHY bring-up are deliberately outside this layer.
+This document defines the FCAN UDP payload contract. `can_udp_pipeline_top` produces the payload; the repository's higher integration tops add Ethernet, IPv4, UDP and GMII TX. RGMII timing and RTL8211E PHY bring-up remain outside the portable RTL.
 
 All multi-byte integer fields use big-endian/network byte order. CAN data bytes preserve bus byte order: DATA0 is the first data byte.
 
@@ -48,7 +48,7 @@ CAN RX
   -> packet request + byte stream
 ```
 
-The output contract toward the future UDP/IP core is:
+The output contract toward the integrated UDP/IP frame builder is:
 
 - `packet_valid / packet_ready`: one handshake per UDP datagram.
 - `packet_length`: complete UDP payload length.
@@ -65,6 +65,8 @@ python host/can_udp_decode.py --bind 0.0.0.0 --port 5000
 
 The host decoder validates magic, protocol version, lengths, reserved bits and payload size before returning records.
 
+`host/fcan_socketcan_bridge.py` additionally validates the packet sequence, converts records to Linux Classical `can_frame`, and writes them to a SocketCAN interface such as `vcan0`. The raw DLC remains in FCAN; ordinary SocketCAN `len` is capped at 8. See `pre_board_verification.md` for ABI and timestamp details.
+
 ## Verification boundary
 
-CI verifies queue ordering/backpressure, packet aggregation/timeout, wire format, host decoding, and CAN-waveform-to-FCAN end-to-end behavior. It does not prove Ethernet MAC, IPv4/UDP checksum, RGMII DDR timing, PHY reset/MDIO configuration, cabling or real vehicle behavior.
+CI verifies queue ordering/backpressure, packet aggregation/timeout, wire format, host decoding, SocketCAN conversion, and CAN-waveform-to-GMII end-to-end behavior including IPv4 checksum and Ethernet FCS. It does not prove RGMII DDR timing, PHY reset/MDIO configuration, cabling or real vehicle behavior.

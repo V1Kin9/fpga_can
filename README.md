@@ -1,13 +1,23 @@
-# Kintex-7 Classical CAN 接收器
+# Kintex-7 Classical CAN → GMII 接收链
 
-这是一个独立可验证的 Classical CAN 2.0A/2.0B 被动接收工程，目标器件为 XC7K325T-2FFG676C。输入为 50 MHz 时钟和收发器 RXD，默认 CAN 比特率为 500 kbit/s。RTL 不包含发送、ACK 或错误帧驱动逻辑，板级输出 TXD 恒为隐性电平。
+这是一个独立可验证的 Classical CAN 2.0A/2.0B 被动接收工程，目标器件为 XC7K325T-2FFG676C。输入为 50 MHz 时钟和收发器 RXD，默认 CAN 比特率为 500 kbit/s。RTL 不包含 CAN 主动发送、ACK 或错误帧驱动逻辑，板级输出 TXD 恒为隐性电平。
+
+```text
+CAN PHY → CAN RX → Parser → Frame Queue → FCAN → UDP → IPv4
+        → Ethernet II → 50/125 MHz Frame CDC → Ethernet MAC TX → GMII
+        → [板级 RGMII/RTL8211E：尚未实现] → RJ45 → PC
+        → FCAN SocketCAN bridge → vcan0 → candump / cansniffer
+```
+
+当前没有实体 FPGA；GMII 是已验证的 RTL 边界，未生成以太网物理链路。验证结果与板级剩余事项见 [无板验证记录](docs/pre_board_verification.md)。
 
 ## 目录
 
-- rtl：输入同步、复位同步、位时序、去填充、帧解析、CRC-15、单帧 ready/valid 缓冲及板级顶层。
-- tb：独立单元仿真与端到端帧激励。
-- constraints：Kintex7_BaseC 引脚与 50 MHz 时钟约束。
-- scripts：Vivado 2020.1 仿真、综合和工程创建入口。
+- rtl：CAN 接收、FCAN/UDP/IP/Ethernet 封装、跨时钟帧缓冲及 GMII MAC TX。
+- tb：分层测试与完整 CAN 波形到 GMII 字节流回归。
+- constraints：既有 CAN-only 板级约束和独立 GMII 综合用双时钟约束。
+- scripts：Vivado 2020.1 仿真、CAN-only ILA 和完整 GMII 综合入口。
+- host：FCAN 解码器、Linux SocketCAN bridge 与无需 vcan 的单元测试。
 - docs/can_rx_design.md：设计与板级验证说明。
 
 ## 快速验证
@@ -65,7 +75,7 @@ The repository also contains a hardware-independent transport layer for the next
 - `can_udp_pipeline_top`: passive CAN RX → queue → UDP payload request/byte stream.
 - `host/can_udp_decode.py`: PC-side decoder/listener for the same byte contract.
 
-This stage exposes the UDP **payload** boundary; the sections below describe the later Ethernet/IPv4/UDP and GMII TX stages. RGMII DDR I/O and RTL8211E PHY bring-up remain board-integration work. See `docs/can_udp_protocol.md`.
+This module exposes the UDP **payload** boundary. The repository also integrates Ethernet/IPv4/UDP framing and GMII TX above it. RGMII DDR I/O and RTL8211E PHY bring-up remain board work. See `docs/can_udp_protocol.md`.
 
 Host-side format tests can be run with:
 
@@ -88,3 +98,33 @@ The hardware-independent transmit path now continues through a complete-frame 50
 `can_gmii_pipeline_top` is the highest portable integration top. Its default CDC capacity is at least the maximum frame produced by `MAX_FRAMES_PER_PACKET`; explicitly overridden capacities must accommodate 58 + 24 × `MAX_FRAMES_PER_PACKET` bytes. RGMII DDR I/O, 125 MHz clock generation/phase, RTL8211E reset/MDIO and board timing constraints remain physical-board integration work.
 
 See `docs/mac_tx_cdc.md`.
+
+## 完整 GMII 验证
+
+运行完整 CAN 波形到 GMII 字节流回归：
+
+    .\scripts\run_sim.ps1 -Top tb_can_gmii_pipeline_top
+
+运行 Vivado 2020.1 无板综合，报告保存在 `build/gmii_synth`：
+
+    .\scripts\run_gmii_synth.ps1
+
+该流程约束 20 ns 和 8 ns 双输入时钟并检查内部时序、详细 CDC、DRC 与资源；未提供 GMII 引脚或输出延迟，因此不能代替板级时序收敛。已有 CAN-only ILA 流保持独立。
+
+## Linux FCAN → SocketCAN
+
+在 Linux 主机上创建测试接口并启动原生 SocketCAN bridge（无需 `python-can`）：
+
+```bash
+sudo modprobe vcan
+sudo ip link add dev vcan0 type vcan
+sudo ip link set up vcan0
+python3 host/fcan_socketcan_bridge.py --bind 0.0.0.0 --port 5000 --interface vcan0
+candump vcan0
+```
+
+`--verbose` 打印 FCAN 序号、FPGA 50 MHz 时间戳和原始 DLC。bridge 识别 UDP 丢包、重复和倒序；普通 SocketCAN 时间戳由主机内核产生，不能代表 FPGA SOF 时间。DLC 9～15 在 `can_frame.len` 中钳为 8，原始值仍存在 FCAN 和日志中。测试无需 vcan：
+
+```bash
+python3 -m unittest discover -s host -p 'test_*.py' -v
+```
