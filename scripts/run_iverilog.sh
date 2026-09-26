@@ -19,9 +19,15 @@ tops=(
 for top in "${tops[@]}"; do
   echo "=== $top ==="
   iverilog -g2012 -s "$top" -o "$BUILD/$top.vvp" "$ROOT"/rtl/*.v "$ROOT"/tb/*.sv
-  output="$(vvp "$BUILD/$top.vvp")"
-  printf '%s\n' "$output"
-  grep -q '^\[PASS\]' <<<"$output"
+  log="$BUILD/$top.log"
+  set +e
+  vvp "$BUILD/$top.vvp" | tee "$log"
+  rc=${PIPESTATUS[0]}
+  set -e
+  if [[ $rc -ne 0 ]]; then
+    exit "$rc"
+  fi
+  grep -q '^\[PASS\]' "$log"
 done
 
 echo "[PASS] All ${#tops[@]} CAN simulation tops"
