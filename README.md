@@ -79,3 +79,12 @@ The hardware-independent network layer now also includes `udp_ipv4_eth_frame_bui
 This layer calculates the IPv4 header checksum and uses a legal zero UDP checksum for IPv4. Preamble/SFD, FCS, IFG, RGMII DDR signaling, MDIO and RTL8211E PHY bring-up remain board-level work.
 
 See `docs/ethernet_udp_frame.md`.
+
+
+## GMII transmit boundary
+
+The hardware-independent transmit path now continues through a complete-frame 50→125 MHz CDC buffer and an Ethernet MAC TX block. The MAC adds preamble/SFD, Ethernet padding, IEEE CRC32/FCS and the 96-bit inter-frame gap, then exposes GMII TX bytes/control.
+
+`can_gmii_pipeline_top` is the highest portable integration top. RGMII DDR I/O, 125 MHz clock generation/phase, RTL8211E reset/MDIO and board timing constraints remain physical-board integration work.
+
+See `docs/mac_tx_cdc.md`.
