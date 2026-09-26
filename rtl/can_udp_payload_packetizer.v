@@ -144,12 +144,18 @@ module can_udp_payload_packetizer #(
                 ST_COLLECT: begin
                     if (frame_valid && frame_ready) begin
                         frame_mem[frame_count] <= frame_word;
-                        if (frame_count == 0)
-                            flush_count <= {FLUSH_WIDTH{1'b0}};
                         frame_count <= frame_count + 1'b1;
                         if (frame_count == MAX_FRAMES - 1) begin
                             state <= ST_REQUEST;
                             flush_count <= {FLUSH_WIDTH{1'b0}};
+                        end else if (frame_count == 0) begin
+                            flush_count <= {FLUSH_WIDTH{1'b0}};
+                        end else if (FLUSH_CYCLES <= 1 ||
+                                     flush_count == FLUSH_CYCLES - 1) begin
+                            state <= ST_REQUEST;
+                            flush_count <= {FLUSH_WIDTH{1'b0}};
+                        end else begin
+                            flush_count <= flush_count + 1'b1;
                         end
                     end else if (frame_count != 0) begin
                         if (FLUSH_CYCLES <= 1 || flush_count == FLUSH_CYCLES - 1) begin
