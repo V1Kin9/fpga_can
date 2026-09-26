@@ -1,119 +1,87 @@
-# Kintex-7 Classical CAN → GMII 接收链
+# Kintex-7 被动 CAN 接收与 GMII 发送链
 
-这是一个独立可验证的 Classical CAN 2.0A/2.0B 被动接收工程，目标器件为 XC7K325T-2FFG676C。输入为 50 MHz 时钟和收发器 RXD，默认 CAN 比特率为 500 kbit/s。RTL 不包含 CAN 主动发送、ACK 或错误帧驱动逻辑，板级输出 TXD 恒为隐性电平。
+本工程面向 Kintex-7 `XC7K325T-2FFG676C`，实现 500 kbit/s Classical CAN 2.0A/2.0B 被动接收、FCAN UDP 封装及 GMII 发送。CAN TXD 恒为隐性电平；RTL 不生成 ACK、主动 CAN 帧或错误帧。当前没有实体 FPGA，验证边界位于 GMII 与 Linux 主机的 SocketCAN 转换。
 
 ```text
-CAN PHY → CAN RX → Parser → Frame Queue → FCAN → UDP → IPv4
-        → Ethernet II → 50/125 MHz Frame CDC → Ethernet MAC TX → GMII
-        → [板级 RGMII/RTL8211E：尚未实现] → RJ45 → PC
-        → FCAN SocketCAN bridge → vcan0 → candump / cansniffer
+CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN → UDP/IPv4/Ethernet II
+              → 50/125 MHz 帧 CDC → Ethernet MAC TX → GMII
+              → [板级 RGMII / RTL8211E / RJ45：尚未实现]
+
+主机收到 FCAN UDP → Linux SocketCAN bridge → vcan0 → candump/cansniffer
 ```
 
-当前没有实体 FPGA；GMII 是已验证的 RTL 边界，未生成以太网物理链路。验证结果与板级剩余事项见 [无板验证记录](docs/pre_board_verification.md)。
+## 当前验证状态
 
-## 目录
+- 既有 15 个分层 HDL 顶层和 1 个完整 CAN 波形→GMII 顶层已通过回归；完整测试比较 37 帧的全部 GMII 字节、FCS 和 IFG。
+- 22 个主机单元测试覆盖 FCAN 解码、SocketCAN 16 字节帧转换、DLC 9～15、序号间隙/环绕/复位等；测试使用模拟输出端，不需要真实 vcan。
+- Vivado 2020.1 已对 `can_gmii_pipeline_top` 完成综合并生成时序、资源、DRC 和详细 CDC 报告。未指定的板级引脚使 DRC 保留告警；综合结果不代表完成板级时序签核。
 
-- rtl：CAN 接收、FCAN/UDP/IP/Ethernet 封装、跨时钟帧缓冲及 GMII MAC TX。
-- tb：分层测试与完整 CAN 波形到 GMII 字节流回归。
-- constraints：既有 CAN-only 板级约束和独立 GMII 综合用双时钟约束。
-- scripts：Vivado 2020.1 仿真、CAN-only ILA 和完整 GMII 综合入口。
-- host：FCAN 解码器、Linux SocketCAN bridge 与无需 vcan 的单元测试。
-- docs/can_rx_design.md：设计与板级验证说明。
+各项证据、告警解释和剩余板级工作见 [无实体板卡验证记录](docs/pre_board_verification.md)。
 
-## 快速验证
+## 目录与文档
 
-在本目录的 PowerShell 中执行：
+| 路径 | 内容 |
+| --- | --- |
+| `rtl/`、`tb/` | CAN 接收、封装、CDC、MAC TX RTL，以及分层和完整端到端仿真 |
+| `constraints/` | CAN-only 板级约束和独立 GMII 无板双时钟约束 |
+| `scripts/` | Vivado 2020.1 仿真、综合、CAN-only ILA 实现脚本 |
+| `host/` | FCAN 解码器、Linux SocketCAN bridge 和单元测试 |
+| [CAN 接收设计](docs/can_rx_design.md) | 协议、位时序、复位和安全接线 |
+| [FCAN 载荷协议](docs/can_udp_protocol.md) | 数据报和记录的字节格式 |
+| [Ethernet/IPv4/UDP 封装](docs/ethernet_udp_frame.md) | 网络头部、默认地址及握手 |
+| [MAC TX 与帧 CDC](docs/mac_tx_cdc.md) | 跨时钟握手、FCS、IFG、GMII |
+| [CAN-only ILA 实现记录](docs/ila_impl_result.md) | 历史实现结果及适用范围 |
 
-    .\scripts\run_all.ps1
-    .\scripts\run_synth.ps1
+## 运行验证
 
-Linux/CI 也可使用 Icarus Verilog 运行同一组 RTL 回归：
+在本目录的 PowerShell 中，运行全部 Vivado xsim 顶层和两个独立综合流：
 
-    bash scripts/run_iverilog.sh
+```powershell
+.\scripts\run_all.ps1
+.\scripts\run_synth.ps1        # can_sniffer_top，CAN-only
+.\scripts\run_gmii_synth.ps1   # can_gmii_pipeline_top，无板双时钟
+```
 
-这些 PowerShell 脚本默认使用 C:\Xilinx\Vivado\2020.1\bin，可通过 -VivadoBin 指定其他版本。脚本在系统临时目录建立纯 ASCII 路径执行 Vivado，并将综合报告保存到 build/synth。单独运行主测试：
+脚本默认使用 `C:\Xilinx\Vivado\2020.1\bin`，可用 `-VivadoBin` 指定其他安装目录。Vivado 在临时 ASCII 路径运行；CAN-only 报告写入 `build/synth/`，GMII 报告写入 `build/gmii_synth/`。单独运行完整顶层仿真：
 
-    .\scripts\run_sim.ps1 -Top tb_can_rx_top
+```powershell
+.\scripts\run_sim.ps1 -Top tb_can_gmii_pipeline_top
+```
 
-可使用 Vivado 批处理创建可继续实现的工程：
+Linux/CI 使用 Icarus Verilog 和 Python 标准库运行便携式回归：
 
-    C:\Xilinx\Vivado\2020.1\bin\vivado.bat -mode batch -source scripts/create_project.tcl
+```bash
+bash scripts/run_iverilog.sh
+python3 -m unittest discover -s host -p 'test_*.py' -v
+```
 
-生成带 ILA 的板级 bitstream 与探针文件：
+不要求 CI 安装 Vivado。`build/` 为本地构建目录，不提交综合报告或 bitstream。
 
-    .\scripts\run_impl_ila.ps1
+## CAN 专用 ILA 与安全接线
 
-脚本按 synth → debug core insertion → opt/place/route → DRC/timing/bus skew → bitstream 执行，产物在 build/impl_ila/can_ila.bit 和 build/impl_ila/can_ila.ltx；同时保留报告和 routed_ila.dcp。ILA 使用 50 MHz 时钟、1024 点深度，探针字段及触发建议见 docs/can_rx_design.md。bitstream 用于上板验证，生成成功不代表实际 CAN 收发器及总线已经验证。
+既有 CAN-only 流可创建工程或生成带 ILA 的 bitstream：
 
-## 板级连接
+```powershell
+C:\Xilinx\Vivado\2020.1\bin\vivado.bat -mode batch -source scripts/create_project.tcl
+.\scripts\run_impl_ila.ps1
+```
+
+ILA 产物位于 `build/impl_ila/can_ila.bit` 和 `can_ila.ltx`。脚本完成综合、调试核插入、布局布线与报告生成；生成 bitstream 不代表已在实体板卡和 CAN 总线上验证。
 
 | 信号 | FPGA 引脚 | 电平 | 作用 |
 | --- | --- | --- | --- |
-| clk_50m | G22 | LVCMOS33 | 板载 50 MHz 时钟 |
-| rst_n | D26 | LVCMOS33 | 低有效复位 |
-| can_rx | D13 | LVCMOS33 | 收发器 RXD |
-| can_tx | B14 | LVCMOS33 | 恒为 1 的 TXD |
+| `clk_50m` | G22 | LVCMOS33 | 板载 50 MHz 时钟 |
+| `rst_n` | D26 | LVCMOS33 | 低有效复位 |
+| `can_rx` | D13 | LVCMOS33 | CAN 收发器 RXD |
+| `can_tx` | B14 | LVCMOS33 | 恒为隐性的 TXD |
 
-D13 和 B14 也是板卡 camera2 接口引脚，CAN 接线时不能同时使用 camera2 功能。FPGA 不应直接接 CANH/CANL，必须使用 CAN 收发器。若使用 TJA1051T/3，VIO 应匹配 FPGA 3.3 V I/O，VCC 按器件要求供电，S 引脚应由硬件上拉到 Silent 模式，保证上电及 FPGA 配置前均不会主动驱动总线。请先核对所用收发器型号和板卡电气连接。
+D13/B14 与板卡 camera2 接口复用，不能同时启用。FPGA 不可直接连接 CANH/CANL，必须经 CAN 收发器。若采用 TJA1051T/3，需核对 VIO、VCC 与板卡 I/O 电平，并通过硬件将 S 引脚保持在 Silent 模式；上电和 FPGA 未配置期间也应保持总线被动。实体接线以实际板卡和收发器原理图为准。
 
-## 输出约定
+## 输出格式与主机桥接
 
-can_rx_top 的 frame_valid 是单个 50 MHz 时钟周期脉冲，只在帧校验通过时发出。frame_id 为 29 位，标准帧使用低 11 位；frame_ide 和 frame_rtr 分别表明扩展帧和远程帧。frame_data[7:0] 为 DATA0，frame_data[15:8] 为 DATA1，以此类推，未使用字节为 0。frame_timestamp 是检测 SOF 边沿时锁存的自由运行 50 MHz 计数值，单位 20 ns。
+`can_rx_top` 的 `frame_valid` 为单个 50 MHz 周期脉冲，仅在帧校验通过时产生。标准帧 ID 使用 `frame_id[10:0]`；扩展帧使用 29 位 ID。DATA0 位于 `frame_data[7:0]`；SOF 时间戳以 20 ns 为单位。Classical CAN 原始 DLC 0～15 均保留，DLC 9～15 的数据长度钳为 8。详细接口见 [CAN 接收设计](docs/can_rx_design.md)。
 
-fifo_valid/fifo_ready 是深度 1 的 ready/valid 缓冲接口；fifo_valid 为 1 时输出保持，握手后弹出。缓冲满而又收到新帧时 fifo_overflow 脉冲指示丢帧。error_valid 与 error_code 对应接收错误，详见设计说明。
-
-## 范围
-
-CAN 接收核心支持标准/扩展数据帧及远程帧、Classical CAN 原始 DLC 0 至 15（DLC 9 至 15 保留原值但有效载荷按 8 字节接收）、位填充、CRC-15、ACK/EOF 形式检查、错误后总线空闲恢复和连续帧。独立 can_rx_top 只有单帧缓冲；仓库的后续集成层已增加多帧队列、FCAN/UDP 封装和 GMII 发送。当前仍没有 CAN FD、CAN 主动发送、CAN 错误帧驱动或物理板卡联调。
-
-## CAN-over-UDP payload layer
-
-The repository also contains a hardware-independent transport layer for the next stage:
-
-- `can_frame_queue`: configurable multi-frame ready/valid queue (default integration depth 64).
-- `can_udp_payload_packetizer`: batches CAN records into the versioned `FCAN` UDP payload format.
-- `can_udp_pipeline_top`: passive CAN RX → queue → UDP payload request/byte stream.
-- `host/can_udp_decode.py`: PC-side decoder/listener for the same byte contract.
-
-This module exposes the UDP **payload** boundary. The repository also integrates Ethernet/IPv4/UDP framing and GMII TX above it. RGMII DDR I/O and RTL8211E PHY bring-up remain board work. See `docs/can_udp_protocol.md`.
-
-Host-side format tests can be run with:
-
-    python -m unittest discover -s host -p 'test_*.py' -v
-
-
-## Ethernet / IPv4 / UDP framing
-
-The hardware-independent network layer now also includes `udp_ipv4_eth_frame_builder` and `can_udp_ipv4_eth_pipeline_top`. They wrap an FCAN payload in Ethernet II + IPv4 + UDP and expose a byte-stream MAC-client interface.
-
-This layer calculates the IPv4 header checksum and uses a legal zero UDP checksum for IPv4. The following GMII TX stage supplies preamble/SFD, FCS and IFG. RGMII DDR signaling, MDIO and RTL8211E PHY bring-up remain board-level work.
-
-See `docs/ethernet_udp_frame.md`.
-
-
-## GMII transmit boundary
-
-The hardware-independent transmit path now continues through a complete-frame 50→125 MHz CDC buffer and an Ethernet MAC TX block. The MAC adds preamble/SFD, Ethernet padding, IEEE CRC32/FCS and the 96-bit inter-frame gap, then exposes GMII TX bytes/control.
-
-`can_gmii_pipeline_top` is the highest portable integration top. Its default CDC capacity is at least the maximum frame produced by `MAX_FRAMES_PER_PACKET`; explicitly overridden capacities must accommodate 58 + 24 × `MAX_FRAMES_PER_PACKET` bytes. RGMII DDR I/O, 125 MHz clock generation/phase, RTL8211E reset/MDIO and board timing constraints remain physical-board integration work.
-
-See `docs/mac_tx_cdc.md`.
-
-## 完整 GMII 验证
-
-运行完整 CAN 波形到 GMII 字节流回归：
-
-    .\scripts\run_sim.ps1 -Top tb_can_gmii_pipeline_top
-
-运行 Vivado 2020.1 无板综合，报告保存在 `build/gmii_synth`：
-
-    .\scripts\run_gmii_synth.ps1
-
-该流程约束 20 ns 和 8 ns 双输入时钟并检查内部时序、详细 CDC、DRC 与资源；未提供 GMII 引脚或输出延迟，因此不能代替板级时序收敛。已有 CAN-only ILA 流保持独立。
-
-## Linux FCAN → SocketCAN
-
-在 Linux 主机上创建测试接口并启动原生 SocketCAN bridge（无需 `python-can`）：
+在 Linux 主机上，可用原生 SocketCAN 将 FCAN UDP 数据写入 vcan，无需 `python-can`：
 
 ```bash
 sudo modprobe vcan
@@ -123,8 +91,8 @@ python3 host/fcan_socketcan_bridge.py --bind 0.0.0.0 --port 5000 --interface vca
 candump vcan0
 ```
 
-`--verbose` 打印 FCAN 序号、FPGA 50 MHz 时间戳和原始 DLC。bridge 识别 UDP 丢包、重复、倒序以及 FPGA 序号从 0 重启；普通 SocketCAN 时间戳由主机内核产生，不能代表 FPGA SOF 时间。DLC 9～15 在 `can_frame.len` 中钳为 8，原始值仍存在 FCAN 和日志中。测试无需 vcan：
+`--verbose` 打印 FPGA 时间戳、数据报序号和原始 DLC。bridge 检测丢包、重复、倒序、序号环绕及从零重启；普通 SocketCAN 时间戳由主机内核产生，不能替代 FPGA SOF 时间戳。当前仅以模拟输出端验证转换逻辑，尚未在真实 vcan 或以太网链路上贯通。协议细节见 [FCAN 载荷协议](docs/can_udp_protocol.md)。
 
-```bash
-python3 -m unittest discover -s host -p 'test_*.py' -v
-```
+## 当前不包含
+
+工程不包含 CAN FD、CAN 主动发送、Ethernet RX、ARP、DHCP、RGMII DDR、125 MHz 板级时钟实现、RTL8211E 复位/MDIO 或实体引脚与源同步约束。这些工作须在拿到板卡并核对 PHY、电源、时钟和布线后开展。

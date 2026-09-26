@@ -1,6 +1,6 @@
 # Vivado 2020.1 ILA 实现记录
 
-2026-09-26 在 Windows 上以 PR #1 的 RTL（315ec90）和本仓库的 ILA 脚本运行。目标器件为 xc7k325tffg676-2，输入时钟约束为 50 MHz。输出保存在本地 `build/impl_ila/`，该构建目录不纳入 Git；可用 `scripts/run_impl_ila.ps1` 重建。
+2026-09-26 在 Windows 上以 PR #1 的 RTL（315ec90）和本仓库的 ILA 脚本运行。此处记录的是 `can_sniffer_top` 的 **CAN-only 历史实现结果**，并非当前 `can_gmii_pipeline_top` 的网络实现结果。目标器件为 xc7k325tffg676-2，输入时钟约束为 50 MHz。输出保存在本地 `build/impl_ila/`，该构建目录不纳入 Git；可用 `scripts/run_impl_ila.ps1` 重建。GMII 顶层的无板综合结果见 [无板验证记录](pre_board_verification.md)。
 
 | 检查项 | 实测结果 |
 | --- | --- |
