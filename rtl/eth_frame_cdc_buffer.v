@@ -101,15 +101,18 @@ module eth_frame_cdc_buffer #(
             end else if (app_tx_valid && app_tx_ready) begin
                 mem[wr_count[ADDR_WIDTH-1:0]] <= app_tx_data;
                 if (app_tx_last) begin
-                    if (wr_count + 1'b1 != stored_length)
-                        app_protocol_error <= 1'b1;
                     capture_active <= 1'b0;
-                    req_toggle <= ~req_toggle;
+                    if (wr_count + 1'b1 != stored_length) begin
+                        // Drop malformed short frames rather than publishing
+                        // uninitialized bytes into the network clock domain.
+                        app_protocol_error <= 1'b1;
+                    end else begin
+                        req_toggle <= ~req_toggle;
+                    end
                 end else if (wr_count + 1'b1 >= stored_length) begin
-                    // The source exceeded the announced frame length.
+                    // Drop a source that exceeded its announced length.
                     app_protocol_error <= 1'b1;
                     capture_active <= 1'b0;
-                    req_toggle <= ~req_toggle;
                 end else begin
                     wr_count <= wr_count + 1'b1;
                 end
