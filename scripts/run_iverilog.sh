@@ -14,6 +14,7 @@ tops=(
   tb_fifo_if
   tb_can_frame_queue
   tb_can_udp_payload_packetizer
+  tb_can_udp_pipeline_top
   tb_sniffer_top
   tb_can_rx_top
 )
