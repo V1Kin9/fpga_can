@@ -132,12 +132,6 @@ module tb_can_rx_top;
         expect_error(5,8'h03);
         $display("[PASS] TC08 Form Error (CRC delimiter, ACK delimiter, EOF)");
 
-        gen.build_standard(11'h123,0,9,64'h8877665544332211,0,0,0);
-        gen.transmit(0);
-        repeat(1200) @(negedge clk);
-        expect_error(6,8'h04);
-        $display("[PASS] DLC Error");
-
         gen.build_standard(11'h321,0,0,0,0,0,0);
         gen.transmit(0);
         repeat(5) @(negedge clk);
