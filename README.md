@@ -54,7 +54,7 @@ fifo_valid/fifo_ready 是深度 1 的 ready/valid 缓冲接口；fifo_valid 为 
 
 ## 范围
 
-支持标准/扩展数据帧及远程帧、Classical CAN 原始 DLC 0 至 15（DLC 9 至 15 保留原值但有效载荷按 8 字节接收）、位填充、CRC-15、ACK/EOF 形式检查、错误后总线空闲恢复和连续帧。当前没有物理板卡联调、CAN FD、发送器、错误帧驱动或多帧存储。后续接 UDP 等输出通道时，可在 fifo_ready/fifo_valid 接口后扩展队列和编码层。
+CAN 接收核心支持标准/扩展数据帧及远程帧、Classical CAN 原始 DLC 0 至 15（DLC 9 至 15 保留原值但有效载荷按 8 字节接收）、位填充、CRC-15、ACK/EOF 形式检查、错误后总线空闲恢复和连续帧。独立 can_rx_top 只有单帧缓冲；仓库的后续集成层已增加多帧队列、FCAN/UDP 封装和 GMII 发送。当前仍没有 CAN FD、CAN 主动发送、CAN 错误帧驱动或物理板卡联调。
 
 ## CAN-over-UDP payload layer
 
@@ -65,7 +65,7 @@ The repository also contains a hardware-independent transport layer for the next
 - `can_udp_pipeline_top`: passive CAN RX → queue → UDP payload request/byte stream.
 - `host/can_udp_decode.py`: PC-side decoder/listener for the same byte contract.
 
-The current RTL stops at the UDP **payload** boundary. Ethernet MAC, IPv4/UDP headers, checksum generation, RGMII DDR I/O and RTL8211E PHY bring-up remain separate board-integration work. See `docs/can_udp_protocol.md`.
+This stage exposes the UDP **payload** boundary; the sections below describe the later Ethernet/IPv4/UDP and GMII TX stages. RGMII DDR I/O and RTL8211E PHY bring-up remain board-integration work. See `docs/can_udp_protocol.md`.
 
 Host-side format tests can be run with:
 
@@ -76,6 +76,15 @@ Host-side format tests can be run with:
 
 The hardware-independent network layer now also includes `udp_ipv4_eth_frame_builder` and `can_udp_ipv4_eth_pipeline_top`. They wrap an FCAN payload in Ethernet II + IPv4 + UDP and expose a byte-stream MAC-client interface.
 
-This layer calculates the IPv4 header checksum and uses a legal zero UDP checksum for IPv4. Preamble/SFD, FCS, IFG, RGMII DDR signaling, MDIO and RTL8211E PHY bring-up remain board-level work.
+This layer calculates the IPv4 header checksum and uses a legal zero UDP checksum for IPv4. The following GMII TX stage supplies preamble/SFD, FCS and IFG. RGMII DDR signaling, MDIO and RTL8211E PHY bring-up remain board-level work.
 
 See `docs/ethernet_udp_frame.md`.
+
+
+## GMII transmit boundary
+
+The hardware-independent transmit path now continues through a complete-frame 50→125 MHz CDC buffer and an Ethernet MAC TX block. The MAC adds preamble/SFD, Ethernet padding, IEEE CRC32/FCS and the 96-bit inter-frame gap, then exposes GMII TX bytes/control.
+
+`can_gmii_pipeline_top` is the highest portable integration top. Its default CDC capacity is at least the maximum frame produced by `MAX_FRAMES_PER_PACKET`; explicitly overridden capacities must accommodate 58 + 24 × `MAX_FRAMES_PER_PACKET` bytes. RGMII DDR I/O, 125 MHz clock generation/phase, RTL8211E reset/MDIO and board timing constraints remain physical-board integration work.
+
+See `docs/mac_tx_cdc.md`.

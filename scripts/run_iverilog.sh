@@ -17,6 +17,8 @@ tops=(
   tb_can_udp_pipeline_top
   tb_udp_ipv4_eth_frame_builder
   tb_can_udp_ipv4_eth_pipeline_top
+  tb_eth_frame_cdc_buffer
+  tb_ethernet_mac_tx
   tb_sniffer_top
   tb_can_rx_top
 )
