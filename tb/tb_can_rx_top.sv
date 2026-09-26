@@ -192,6 +192,16 @@ module tb_can_rx_top;
         if(frames!=13 || frame_id!=29'h235 || frame_data!=64'hfedcba9876543210)
             $fatal(1,"+0.5%% clock offset failed frames=%0d id=%h",frames,frame_id);
         $display("[PASS] TC10 Clock Offset -0.5%% / +0.5%%");
+
+        gen.build_standard(11'h236,0,9,64'h1122334455667788,0,0,0);
+        gen.transmit(0);
+        repeat(5) @(negedge clk);
+        expect_frame(14,29'h236,9,64'h1122334455667788);
+        gen.build_standard(11'h237,0,15,64'h8877665544332211,0,0,0);
+        gen.transmit(0);
+        repeat(5) @(negedge clk);
+        expect_frame(15,29'h237,15,64'h8877665544332211);
+        $display("[PASS] Classical CAN raw DLC 9/15 preserve DLC and carry 8 data bytes");
         $finish;
     end
 endmodule
