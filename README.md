@@ -70,3 +70,12 @@ The current RTL stops at the UDP **payload** boundary. Ethernet MAC, IPv4/UDP he
 Host-side format tests can be run with:
 
     python -m unittest discover -s host -p 'test_*.py' -v
+
+
+## Ethernet / IPv4 / UDP framing
+
+The hardware-independent network layer now also includes `udp_ipv4_eth_frame_builder` and `can_udp_ipv4_eth_pipeline_top`. They wrap an FCAN payload in Ethernet II + IPv4 + UDP and expose a byte-stream MAC-client interface.
+
+This layer calculates the IPv4 header checksum and uses a legal zero UDP checksum for IPv4. Preamble/SFD, FCS, IFG, RGMII DDR signaling, MDIO and RTL8211E PHY bring-up remain board-level work.
+
+See `docs/ethernet_udp_frame.md`.
