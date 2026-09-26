@@ -1,20 +1,21 @@
 # Kintex-7 被动 CAN 接收与 GMII 发送链
 
-本工程面向 Kintex-7 `XC7K325T-2FFG676C`，实现 500 kbit/s Classical CAN 2.0A/2.0B 被动接收、FCAN UDP 封装及 GMII 发送。CAN TXD 恒为隐性电平；RTL 不生成 ACK、主动 CAN 帧或错误帧。当前没有实体 FPGA，验证边界位于 GMII 与 Linux 主机的 SocketCAN 转换。
+本工程面向 Kintex-7 `XC7K325T-2FFG676C`，实现 Classical CAN 2.0A/2.0B 被动接收、FCAN UDP 封装及 GMII 发送。CAN 速率可在 125/250/500/1000 kbit/s 间用 `CAN_BITRATE` 参数选择，默认 500 kbit/s，采样点维持 80%。集成顶层默认发送 FCAN v2，主机仍支持 v1。CAN TXD 恒为隐性电平；RTL 不生成 ACK、主动 CAN 帧或错误帧。当前没有实体 FPGA，验证边界位于 GMII 与 Linux 主机的 SocketCAN 转换。
 
 ```text
-CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN → UDP/IPv4/Ethernet II
+CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/IPv4/Ethernet II
               → 50/125 MHz 帧 CDC → Ethernet MAC TX → GMII
               → [板级 RGMII / RTL8211E / RJ45：尚未实现]
 
 主机收到 FCAN UDP → Linux SocketCAN bridge → vcan0 → candump/cansniffer
+                   ↘ PCAPNG / candump compact log 离线抓包
 ```
 
 ## 当前验证状态
 
-- 既有 15 个分层 HDL 顶层和 1 个完整 CAN 波形→GMII 顶层已通过回归；完整测试比较 37 帧的全部 GMII 字节、FCS 和 IFG。
-- 22 个主机单元测试覆盖 FCAN 解码、SocketCAN 16 字节帧转换、DLC 9～15、序号间隙/环绕/复位等；测试使用模拟输出端，不需要真实 vcan。
-- Vivado 2020.1 已对 `can_gmii_pipeline_top` 完成综合并生成时序、资源、DRC 和详细 CDC 报告。未指定的板级引脚使 DRC 保留告警；综合结果不代表完成板级时序签核。
+- 既有 16 个 HDL 顶层保留；新增 FCAN v2 字节布局、诊断/CDC、10,000 帧固定 seed 压力测试和四速率矩阵。完整 CAN→GMII 测试比较 37 帧的全部 GMII 字节、FCS 和 IFG。
+- 主机单元测试覆盖双版本解码、session 切换、类型记录、SocketCAN 16 字节转换、PCAPNG 与 compact log 的字节布局；无需真实 vcan。Linux 可选 `scripts/test_vcan_integration.sh` 会在缺少权限时清楚跳过。
+- Vivado 2020.1 综合、时序、DRC 和 CDC 报告由 `run_gmii_synth.ps1` 生成。未指定的板级引脚使 DRC 保留告警；综合结果不代表板级时序签核。
 
 各项证据、告警解释和剩余板级工作见 [无实体板卡验证记录](docs/pre_board_verification.md)。
 
@@ -25,9 +26,10 @@ CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN → UDP/IPv4/Ethernet
 | `rtl/`、`tb/` | CAN 接收、封装、CDC、MAC TX RTL，以及分层和完整端到端仿真 |
 | `constraints/` | CAN-only 板级约束和独立 GMII 无板双时钟约束 |
 | `scripts/` | Vivado 2020.1 仿真、综合、CAN-only ILA 实现脚本 |
-| `host/` | FCAN 解码器、Linux SocketCAN bridge 和单元测试 |
+| `host/` | FCAN v1/v2 解码器、Linux SocketCAN bridge、PCAPNG/compact log 抓包及单元测试 |
 | [CAN 接收设计](docs/can_rx_design.md) | 协议、位时序、复位和安全接线 |
 | [FCAN 载荷协议](docs/can_udp_protocol.md) | 数据报和记录的字节格式 |
+| [诊断与抓包](docs/diagnostics.md) | 错误/状态计数、CDC、时间戳及离线格式 |
 | [Ethernet/IPv4/UDP 封装](docs/ethernet_udp_frame.md) | 网络头部、默认地址及握手 |
 | [MAC TX 与帧 CDC](docs/mac_tx_cdc.md) | 跨时钟握手、FCS、IFG、GMII |
 | [CAN-only ILA 实现记录](docs/ila_impl_result.md) | 历史实现结果及适用范围 |
@@ -48,11 +50,12 @@ CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN → UDP/IPv4/Ethernet
 .\scripts\run_sim.ps1 -Top tb_can_gmii_pipeline_top
 ```
 
-Linux/CI 使用 Icarus Verilog 和 Python 标准库运行便携式回归：
+Linux/CI 使用 Icarus Verilog 和 Python 标准库运行便携式回归；默认压力测试接收 10,000 条记录，固定 seed 可覆盖：
 
 ```bash
 bash scripts/run_iverilog.sh
 python3 -m unittest discover -s host -p 'test_*.py' -v
+SEED=1234 FRAME_COUNT=100000 bash scripts/run_stress.sh
 ```
 
 不要求 CI 安装 Vivado。`build/` 为本地构建目录，不提交综合报告或 bitstream。
@@ -91,7 +94,7 @@ python3 host/fcan_socketcan_bridge.py --bind 0.0.0.0 --port 5000 --interface vca
 candump vcan0
 ```
 
-`--verbose` 打印 FPGA 时间戳、数据报序号和原始 DLC。bridge 检测丢包、重复、倒序、序号环绕及从零重启；普通 SocketCAN 时间戳由主机内核产生，不能替代 FPGA SOF 时间戳。当前仅以模拟输出端验证转换逻辑，尚未在真实 vcan 或以太网链路上贯通。协议细节见 [FCAN 载荷协议](docs/can_udp_protocol.md)。
+`--verbose` 打印 FPGA 时间戳、数据报序号和原始 DLC。bridge 检测丢包、重复、倒序和序号环绕；v2 通过外部提供的 `session_id` 识别重启，v1 仍使用归零启发式判断。普通 SocketCAN 时间戳由主机内核产生，不能替代 FPGA SOF 时间戳。真实 vcan 可选脚本与离线抓包方式见 [诊断与抓包](docs/diagnostics.md)；尚未在实体以太网链路上贯通。
 
 ## 当前不包含
 

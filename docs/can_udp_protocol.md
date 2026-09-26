@@ -1,10 +1,10 @@
 # FCAN UDP 载荷协议
 
-本文定义 FPGA 与主机之间的 FCAN UDP **载荷**格式。`can_udp_pipeline_top` 生成 FCAN；上层 `can_udp_ipv4_eth_pipeline_top` 和 `can_gmii_pipeline_top` 再生成 UDP/IPv4/Ethernet 帧及 GMII 发送信号。板级 RGMII 和 RTL8211E 尚未实现。
+本文定义 FPGA 与主机之间的 FCAN UDP **载荷**格式。集成顶层默认发送 v2，`FCAN_PROTOCOL_VERSION=1` 可保留既有 v1 发送格式；主机解码器和 SocketCAN bridge 同时接收 v1/v2。板级 RGMII 和 RTL8211E 尚未实现。
 
 所有多字节整数均采用网络字节序（大端）。CAN 的 DATA0 是总线上的第一个数据字节。
 
-## 数据报头
+## FCAN v1 数据报头（兼容）
 
 每个 UDP 载荷以 16 字节头部开始。
 
@@ -20,7 +20,7 @@
 
 默认 `MAX_FRAMES_PER_PACKET=16`。批次未满时，`FLUSH_CYCLES=50000` 会在 50 MHz 时钟下约 1 ms 后触发发送。FPGA 复位后，序号从 0 重新开始；FCAN v1 未定义独立的启动轮次标识。
 
-## CAN 帧记录
+## FCAN v1 CAN 帧记录
 
 每条记录固定为 24 字节。
 
@@ -35,6 +35,57 @@
 
 DLC 9～15 保留原始 4 位值，但 Classical CAN 的有效载荷仍为 8 字节。远程帧保留请求的 DLC，不携带数据。
 
+## FCAN v2 数据报头
+
+| 偏移 | 字节 | 字段 | 定义 |
+| ---: | ---: | --- | --- |
+| 0 | 4 | magic | ASCII `FCAN` |
+| 4 | 1 | version | `2` |
+| 5 | 1 | header length | `20` |
+| 6 | 1 | record length | `32` |
+| 7 | 1 | record count | 本数据报中的全部类型记录数，默认最多 16 |
+| 8 | 4 | sequence | 32 位数据报序号，自然环绕；复位后从零开始 |
+| 12 | 4 | session ID | 由顶层 `session_id[31:0]` 提供，打包器只复制它 |
+| 16 | 4 | reserved | 零 |
+
+所有多字节字段均为大端。`session_id` 在首条记录进入打包器时锁存并保持到本包发完；系统集成者应在复位后提供新的、稳定的值。当前 RTL **没有**可靠的持久化启动计数或随机源，也不保证默认零值可区分重启。板级来源待实物集成确定。主机以 v2 的 `session_id` 改变作为新轮次，即使新轮次的序号零包丢失也能识别；若不同启动轮次重用同一值，则仍无法可靠区分。
+
+## FCAN v2 固定记录
+
+每条记录固定 32 字节，通用布局为：byte 0 类型，byte 1 flags/code，byte 2～3 为类型相关字段，byte 4～7 ID/辅助字段，byte 8～15 时间戳，byte 16～31 载荷。类型 `0x00=CAN_FRAME`、`0x01=CAN_ERROR`、`0x02=DEVICE_STATUS`。记录总数计入头部 `record count`；`packet_length=20+32×record_count`。
+
+| 偏移 | 字节 | CAN_FRAME (`0x00`) | CAN_ERROR (`0x01`) | DEVICE_STATUS (`0x02`) |
+| ---: | ---: | --- | --- | --- |
+| 0 | 1 | 类型 `0` | 类型 `1` | 类型 `2` |
+| 1 | 1 | IDE/RTR/CRC_OK flags | parser error code | status flags |
+| 2 | 1 | raw DLC | subtype，当前零 | queue level，u8 饱和 |
+| 3 | 1 | 保留零 | 保留零 | high watermark，u8 饱和 |
+| 4 | 4 | CAN ID，高 3 位零 | auxiliary，当前零 | 保留零 |
+| 8 | 8 | SOF 50 MHz tick | 错误事件 50 MHz tick | uptime 50 MHz tick |
+| 16 | 8 | DATA0～7 | 保留零 | 前四个大端 u16 计数 |
+| 24 | 8 | 保留零 | 保留零 | 后四个大端 u16 计数 |
+
+| 类型 | byte 1 | byte 2 | byte 4～7 | byte 8～15 | byte 16～31 |
+| --- | --- | --- | --- | --- | --- |
+| CAN_FRAME `0x00` | bit0 IDE、bit1 RTR、bit2 CRC_OK；其余零 | 原始 DLC 0～15 | 29 位 ID，高 3 位零 | SOF，50 MHz tick | byte 16～23 DATA0～7；byte 24～31 零 |
+| CAN_ERROR `0x01` | parser error code | subtype，当前零 | auxiliary，当前零 | 事件时间戳，50 MHz tick | 当前全零 |
+| DEVICE_STATUS `0x02` | status flags | 队列水位，u8 饱和 | byte 4～7 零 | uptime，50 MHz tick | 8 个大端 u16 饱和计数 |
+
+CAN_FRAME 的 byte 3 为零。DLC 9～15 保留原始值，有效 DATA 长度钳为 8。RTR 不带数据。CAN_ERROR 不代表有效 CAN 帧；parser 错误码 `1=stuff`、`2=CRC`、`3=form`、`5=abort/internal`。诊断记录空间不足时采用明确的丢弃计数，见 [诊断架构](diagnostics.md)。
+
+DEVICE_STATUS 的 byte 2 是当前队列水位，byte 3 是启动以来队列高水位，二者大于 255 时饱和为 `0xff`。byte 1 的 bit0 表示任一 u16 计数达到 `0xffff`，bit1 表示当前队列水位超过 255，bit2 表示高水位超过 255，其余位为零。byte 16～31 依次是 `rx_frames_total`、`crc_errors`、`stuff_errors`、`form_errors`、`queue_drop_count`、`cdc_protocol_error_count`、`mac_underrun_count`、`diagnostic_drop_count`，各占 2 字节。计数到 `0xffff` 后保持不变，复位清零；不发生隐式环绕或截断。`STATUS_INTERVAL_CYCLES=50_000_000` 在 50 MHz 下约为 1 秒，可缩小供仿真使用。状态时间戳是模块 uptime，不是外部 UTC。
+
+| DEVICE_STATUS 偏移 | 字节 | 大端 u16 计数 |
+| ---: | ---: | --- |
+| 16 | 2 | `rx_frames_total` |
+| 18 | 2 | `crc_errors` |
+| 20 | 2 | `stuff_errors` |
+| 22 | 2 | `form_errors` |
+| 24 | 2 | `queue_drop_count` |
+| 26 | 2 | `cdc_protocol_error_count` |
+| 28 | 2 | `mac_underrun_count` |
+| 30 | 2 | `diagnostic_drop_count` |
+
 ## RTL 接口
 
 `can_udp_pipeline_top` 的路径为：
@@ -48,7 +99,7 @@ CAN RX → 单帧缓冲 → 多帧队列 → FCAN 打包器 → 数据报请求/
 - `packet_sequence`：当前数据报的序号。
 - `tx_valid / tx_ready / tx_data / tx_last`：可反压的 8 位字节流。
 
-打包器序列化数据报时不接收下一帧；上游队列吸收这段间隔。默认网络链路按 1 GbE GMII 设计，但实际吞吐仍须上板验证。
+打包器序列化数据报时不接收下一帧；上游队列吸收这段间隔。v2 的待发送 CAN_ERROR 使用单槽暂存；该槽已满时，额外错误计入 `diagnostic_drop_count`。状态记录同样暂存，周期到来但前一条未被接收时计入该计数。错误优先于状态，状态优先于 CAN_FRAME。默认网络链路按 1 GbE GMII 设计，但实际吞吐仍须上板验证。
 
 ## 主机使用与校验
 
@@ -58,7 +109,7 @@ CAN RX → 单帧缓冲 → 多帧队列 → FCAN 打包器 → 数据报请求/
 python3 host/can_udp_decode.py --bind 0.0.0.0 --port 5000
 ```
 
-`can_udp_decode.py` 校验 magic、版本、头/记录长度、记录保留位和载荷总长度。`fcan_socketcan_bridge.py` 还校验头部保留字节与标准/扩展 ID 范围，并将 CRC 正确的记录写入 Linux SocketCAN；普通 `can_frame.len` 将 DLC 9～15 钳为 8。bridge 检测序号间隙、重复、倒序、`0xffffffff → 0` 环绕及非环绕的序号归零。由于协议没有 epoch ID，如果复位后的首个零序号包丢失，主机无法仅凭后续序号无歧义地区分新轮次和旧包。
+`can_udp_decode.py` 校验 magic、版本、头/记录长度、保留位、ID 范围和载荷总长度。`fcan_socketcan_bridge.py` 只把 CRC 正确的 CAN_FRAME 写入 Linux SocketCAN；CAN_ERROR/DEVICE_STATUS 以日志报告。普通 `can_frame.len` 将 DLC 9～15 钳为 8。bridge 检测序号间隙、重复、倒序和自然环绕；v1 对非环绕的序号归零采用启发式重启判断，v2 按 session ID 切换。v1 若复位后的首个零序号包丢失，仍无法无歧义判断新轮次。离线抓包工具见 [诊断架构](diagnostics.md)。
 
 ## 验证边界
 
