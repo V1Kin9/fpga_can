@@ -9,9 +9,11 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 MAGIC = b"FCAN"
-VERSION = 1
+VERSION = 1  # Kept as the v1 compatibility constant.
 HEADER_LEN = 16
 RECORD_LEN = 24
+V2_HEADER_LEN = 20
+V2_RECORD_LEN = 32
 
 
 @dataclass(frozen=True)
@@ -32,9 +34,38 @@ class CanRecord:
 
 
 @dataclass(frozen=True)
+class CanErrorRecord:
+    error_code: int
+    subtype: int
+    auxiliary: int
+    timestamp_ticks: int
+
+
+@dataclass(frozen=True)
+class DeviceStatusRecord:
+    flags: int
+    queue_level: int
+    queue_high_watermark: int
+    uptime_ticks: int
+    rx_frames_total: int
+    crc_errors: int
+    stuff_errors: int
+    form_errors: int
+    queue_drop_count: int
+    cdc_protocol_error_count: int
+    mac_underrun_count: int
+    diagnostic_drop_count: int
+
+
+@dataclass(frozen=True)
 class CanPacket:
     sequence: int
     frames: Tuple[CanRecord, ...]
+    version: int = 1
+    session_id: int | None = None
+    errors: Tuple[CanErrorRecord, ...] = ()
+    statuses: Tuple[DeviceStatusRecord, ...] = ()
+    records: Tuple[CanRecord | CanErrorRecord | DeviceStatusRecord, ...] = ()
 
 
 def decode_payload(payload: bytes) -> CanPacket:
@@ -49,12 +80,24 @@ def decode_payload(payload: bytes) -> CanPacket:
     frame_count = payload[7]
     sequence = int.from_bytes(payload[8:12], "big")
 
-    if version != VERSION:
+    if version not in (1, 2):
         raise ValueError(f"unsupported FCAN version {version}")
-    if header_len != HEADER_LEN:
+    expected_header_len = HEADER_LEN if version == 1 else V2_HEADER_LEN
+    expected_record_len = RECORD_LEN if version == 1 else V2_RECORD_LEN
+    if header_len != expected_header_len:
         raise ValueError(f"unsupported FCAN header length {header_len}")
-    if record_len != RECORD_LEN:
+    if record_len != expected_record_len:
         raise ValueError(f"unsupported FCAN record length {record_len}")
+    if len(payload) < header_len:
+        raise ValueError("payload shorter than FCAN header")
+    if version == 1:
+        if payload[12:16] != bytes(4):
+            raise ValueError("FCAN v1 header reserved bytes are non-zero")
+        session_id = None
+    else:
+        session_id = int.from_bytes(payload[12:16], "big")
+        if payload[16:20] != bytes(4):
+            raise ValueError("FCAN v2 header reserved bytes are non-zero")
 
     expected = header_len + frame_count * record_len
     if len(payload) != expected:
@@ -63,25 +106,54 @@ def decode_payload(payload: bytes) -> CanPacket:
         )
 
     frames: List[CanRecord] = []
+    errors: List[CanErrorRecord] = []
+    statuses: List[DeviceStatusRecord] = []
+    records: List[CanRecord | CanErrorRecord | DeviceStatusRecord] = []
     offset = header_len
     for _ in range(frame_count):
         record = payload[offset : offset + record_len]
-        raw_id = int.from_bytes(record[0:4], "big")
+        if version == 2 and record[0] == 1:
+            if record[3] or record[16:32] != bytes(16):
+                raise ValueError("CAN_ERROR reserved bytes are non-zero")
+            error = CanErrorRecord(record[1], record[2],
+                int.from_bytes(record[4:8], "big"), int.from_bytes(record[8:16], "big"))
+            errors.append(error)
+            records.append(error)
+            offset += record_len
+            continue
+        if version == 2 and record[0] == 2:
+            if record[1] & 0xF8:
+                raise ValueError("DEVICE_STATUS reserved flag bits are non-zero")
+            if record[4:8] != bytes(4):
+                raise ValueError("DEVICE_STATUS reserved bytes are non-zero")
+            counters = tuple(int.from_bytes(record[i:i+2], "big") for i in range(16, 32, 2))
+            status = DeviceStatusRecord(record[1], record[2], record[3],
+                int.from_bytes(record[8:16], "big"), *counters)
+            statuses.append(status)
+            records.append(status)
+            offset += record_len
+            continue
+        if version == 2 and record[0] != 0:
+            raise ValueError(f"unsupported FCAN v2 record type {record[0]}")
+        raw_id = int.from_bytes(record[4:8] if version == 2 else record[0:4], "big")
         if raw_id & ~0x1FFFFFFF:
             raise ValueError(f"CAN ID has reserved high bits set: 0x{raw_id:08x}")
 
-        flags = record[4]
+        flags = record[1] if version == 2 else record[4]
         if flags & 0xF8:
             raise ValueError(f"record has reserved flag bits set: 0x{flags:02x}")
+        if not (flags & 0x01) and raw_id > 0x7FF:
+            raise ValueError(f"standard CAN ID exceeds 11 bits: 0x{raw_id:08x}")
 
-        dlc = record[5]
+        dlc = record[2] if version == 2 else record[5]
         if dlc > 15:
             raise ValueError(f"invalid Classical CAN DLC {dlc}")
-        if record[6:8] != b"\x00\x00":
+        if (record[3] if version == 2 else record[6:8]) != (0 if version == 2 else b"\x00\x00"):
             raise ValueError("record reserved bytes are non-zero")
+        if version == 2 and record[24:32] != bytes(8):
+            raise ValueError("CAN_FRAME trailing reserved bytes are non-zero")
 
-        frames.append(
-            CanRecord(
+        frame = CanRecord(
                 can_id=raw_id,
                 ide=bool(flags & 0x01),
                 rtr=bool(flags & 0x02),
@@ -90,10 +162,13 @@ def decode_payload(payload: bytes) -> CanPacket:
                 timestamp_ticks=int.from_bytes(record[8:16], "big"),
                 data=bytes(record[16:24]),
             )
-        )
+        frames.append(frame)
+        records.append(frame)
         offset += record_len
 
-    return CanPacket(sequence=sequence, frames=tuple(frames))
+    return CanPacket(sequence=sequence, frames=tuple(frames), version=version,
+                     session_id=session_id, errors=tuple(errors), statuses=tuple(statuses),
+                     records=tuple(records))
 
 
 def format_record(sequence: int, frame: CanRecord) -> str:
@@ -120,6 +195,10 @@ def listen(bind: str, port: int) -> None:
             continue
         for frame in packet.frames:
             print(format_record(packet.sequence, frame))
+        for error in packet.errors:
+            print(f"seq={packet.sequence} CAN_ERROR code={error.error_code} ts={error.timestamp_ticks}")
+        for status in packet.statuses:
+            print(f"seq={packet.sequence} DEVICE_STATUS frames={status.rx_frames_total} drops={status.queue_drop_count}")
 
 
 def main() -> None:
