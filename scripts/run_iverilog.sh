@@ -28,6 +28,7 @@ tops=(
   tb_gray_event_counter_cdc
   tb_fcan_random_stress
   tb_can_reset_midframe
+  tb_can_random_waveforms
   tb_mac_idle_reset
 )
 

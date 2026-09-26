@@ -25,7 +25,7 @@ GMII 综合报告位于本地忽略目录 `build/gmii_synth/`：`utilization.rpt
 | 64 位 SOF 时间戳、帧队列、backpressure、FCAN 顺序 | 分层回归和完整 37 帧回归 |
 | FCAN v2 头部、类型记录、外部 session ID、错误与状态 | `tb_fcan_v2` 字节级检查、`tb_can_udp_pipeline_v2` parser→诊断→FCAN 回归、主机双版本单元测试 |
 | 定向故障与复位 | CAN stuff/CRC/form 错误、CDC 畸形长度、MAC underrun 既有向量；新增诊断计数、待发 CDC 帧复位、打包中复位后旧 session 不泄漏 |
-| 固定 seed 随机压力 | 默认 10,000 条已接收记录；随机 ID/IDE/RTR/DLC 0～15/DATA/间隔、包入口与字节流背压；scoreboard 比较全部记录字节、次序、重复和显式丢弃数，队列高水位达到深度 16；`+SEED`/`+FRAMES` 可复现 |
+| 固定 seed 随机压力 | 帧队列入口默认 10,000 条已接收记录；随机 ID/IDE/RTR/DLC 0～15/DATA/间隔、包入口与字节流背压；scoreboard 比较全部记录字节、次序、重复和显式丢弃数，队列高水位达到深度 16；另有 128 条实际 CAN 总线随机波形经 RX parser 校验，包含四种帧组合；`+SEED`/`+FRAMES` 可复现队列压力 |
 | CAN 四速率 125/250/500/1000 kbit/s | 同一个参数化 testbench 在每种速率验证标准/扩展 DLC8、CRC 与 SOF 时间戳；10 TQ、80% 采样点不变 |
 | UDP/IPv4/Ethernet II 字节序与长度、IPv4 checksum | 完整 CAN→GMII golden 字节比较 |
 | preamble/SFD、以太网 FCS、96-bit IFG | 独立多项式方向的 FCS 参考、完整 GMII 字节比较、IFG 断言 |

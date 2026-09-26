@@ -13,7 +13,7 @@ CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/I
 
 ## 当前验证状态
 
-- 既有 16 个 HDL 顶层保留；新增 FCAN v2 字节布局、诊断/CDC、10,000 帧固定 seed 压力测试和四速率矩阵。完整 CAN→GMII 测试比较 37 帧的全部 GMII 字节、FCS 和 IFG。
+- 既有 16 个 HDL 顶层保留；新增 FCAN v2 字节布局、诊断/CDC、10,000 条帧队列入口随机压力、128 条实际 CAN 总线随机波形和四速率矩阵。完整 CAN→GMII 测试比较 37 帧的全部 GMII 字节、FCS 和 IFG。
 - 主机单元测试覆盖双版本解码、session 切换、类型记录、SocketCAN 16 字节转换、PCAPNG 与 compact log 的字节布局；无需真实 vcan。Linux 可选 `scripts/test_vcan_integration.sh` 会在缺少权限时清楚跳过。
 - Vivado 2020.1 综合、时序、DRC 和 CDC 报告由 `run_gmii_synth.ps1` 生成。未指定的板级引脚使 DRC 保留告警；综合结果不代表板级时序签核。
 
