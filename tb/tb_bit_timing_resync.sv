@@ -45,9 +45,16 @@ module tb_bit_timing_resync;
     endtask
 
     task pulse_edge_at(input integer phase, input integer expected_phase);
+        integer waits;
         begin
-            while (dut.phase_clock != phase)
+            waits = 0;
+            while (dut.phase_clock != phase && waits < 200) begin
                 @(negedge clk);
+                waits = waits + 1;
+            end
+            if (dut.phase_clock != phase)
+                $fatal(1, "timed out waiting for phase=%0d current=%0d",
+                       phase, dut.phase_clock);
             edge_detect = 1;
             @(posedge clk); #1;
             if (!sync_event || dut.phase_clock != expected_phase)
@@ -77,6 +84,37 @@ module tb_bit_timing_resync;
         hard_sync();
         pulse_edge_at(60, 50);
         $display("[PASS] Resync classification follows 80%% sample point");
+
+        // Resynchronization exactly on the nominal sample clock must not emit
+        // a sample before rewinding and then emit a second copy later.
+        reset_dut();
+        hard_sync();
+        begin : sample_rewind_case
+            integer waits;
+            integer samples;
+            waits = 0;
+            while (dut.phase_clock != 79 && waits < 200) begin
+                @(negedge clk);
+                waits = waits + 1;
+            end
+            if (dut.phase_clock != 79)
+                $fatal(1, "timed out waiting for pre-sample phase");
+            edge_detect = 1;
+            @(posedge clk); #1;
+            if (sample_tick)
+                $fatal(1, "resync emitted stale sample tick before rewind");
+            @(negedge clk);
+            edge_detect = 0;
+            samples = 0;
+            repeat (20) begin
+                @(posedge clk); #1;
+                if (sample_tick)
+                    samples = samples + 1;
+            end
+            if (samples != 1)
+                $fatal(1, "adjusted bit produced %0d sample ticks, expected 1", samples);
+        end
+        $display("[PASS] Resync at sample point emits exactly one sample");
 
         // Negative phase error in TSEG2: shorten by at most SJW.
         reset_dut();
