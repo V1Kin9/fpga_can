@@ -21,6 +21,7 @@ tops=(
   tb_ethernet_mac_tx
   tb_sniffer_top
   tb_can_rx_top
+  tb_can_gmii_pipeline_top
 )
 
 for top in "${tops[@]}"; do

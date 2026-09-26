@@ -18,7 +18,8 @@ $tops = @(
     "tb_eth_frame_cdc_buffer",
     "tb_ethernet_mac_tx",
     "tb_sniffer_top",
-    "tb_can_rx_top"
+    "tb_can_rx_top",
+    "tb_can_gmii_pipeline_top"
 )
 foreach ($top in $tops) {
     Write-Host "=== $top ==="
