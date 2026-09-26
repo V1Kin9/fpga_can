@@ -76,10 +76,11 @@ module tb_udp_ipv4_eth_frame_builder;
         rst_n = 1;
 
         packet_valid = 1;
+        #1;
+        if (!frame_valid || !packet_ready || frame_length != 82)
+            $fatal(1, "frame request metadata valid=%b ready=%b len=%0d",
+                   frame_valid, packet_ready, frame_length);
         @(posedge clk); #1;
-        if (!frame_valid || frame_length != 82)
-            $fatal(1, "frame request metadata valid=%b len=%0d",
-                   frame_valid, frame_length);
         @(negedge clk);
         packet_valid = 0;
 
