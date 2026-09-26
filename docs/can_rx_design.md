@@ -34,7 +34,7 @@ error_valid 和 frame_error 为单周期事件。error_code：0x01 位填充错�
 
 ## 7. 时间戳与输出缓冲
 
-64 位自由运行计数器在 50 MHz 时钟上递增；硬同步 SOF 边沿时锁存 frame_timestamp，单位为 20 ns。第七个 EOF 位产生的帧事件及数据可供同一时钟域逻辑接收。单帧 FIFO 接口保持 fifo_valid 与各字段，直到 fifo_ready 握手。满而无法接收新帧时，fifo_overflow 脉冲指示丢帧。板级顶层目前将 fifo_ready 接为 1，并通过 MARK_DEBUG 保留观测信号；外部 UDP 或其他输出应连接 can_rx_top 的 FIFO 接口，并按最大帧到达速率选择更深缓冲。
+64 位自由运行计数器在 50 MHz 时钟上递增；硬同步 SOF 边沿时锁存 frame_timestamp，单位为 20 ns。第七个 EOF 位产生的帧事件及数据可供同一时钟域逻辑接收。单帧 FIFO 接口保持 fifo_valid 与各字段，直到 fifo_ready 握手。满而无法接收新帧时，fifo_overflow 脉冲指示丢帧。CAN-only 板级顶层 `can_sniffer_top` 将 fifo_ready 接为 1，并通过 MARK_DEBUG 保留观测信号；网络集成顶层 `can_gmii_pipeline_top` 则在接收器后连接多帧队列、FCAN/UDP 封装和 GMII 发送链。两种顶层的缓冲和验证边界不同。
 
 ## 8. 时钟、复位与引脚
 
@@ -44,7 +44,7 @@ XDC 指定 G22 50 MHz 时钟、D26 低有效复位、D13 RXD、B14 TXD，I/O 标
 
 ## 9. 验证和上板步骤
 
-运行 scripts/run_all.ps1，检查全部仿真顶层的 PASS（包含 sample-point/TSEG1/TSEG2 重同步回归）；运行 scripts/run_synth.ps1，检查 build/synth 的利用率、时序和 DRC 报告。运行 scripts/run_impl_ila.ps1，检查 build/impl_ila 下的 routed_timing.rpt、routed_drc.rpt、routed_bus_skew.rpt、can_ila.bit 和 can_ila.ltx。该脚本使用非工程模式，将 ILA 插入综合后网表，并完成布局布线。若需图形界面工程，可另用 scripts/create_project.tcl 建立。
+运行 `scripts/run_all.ps1`，检查 16 个仿真顶层的 PASS（包含 sample-point/TSEG1/TSEG2 重同步和完整 CAN→GMII 回归）。`scripts/run_synth.ps1` 与 `scripts/run_impl_ila.ps1` 只针对 CAN-only 顶层；前者生成 `build/synth/` 的综合报告，后者在 `build/impl_ila/` 生成 `routed_timing.rpt`、`routed_drc.rpt`、`routed_bus_skew.rpt`、`can_ila.bit` 和 `can_ila.ltx`。ILA 脚本使用非工程模式，将调试核插入综合后网表并完成布局布线；若需图形界面工程，可另用 `scripts/create_project.tcl` 建立。完整网络顶层的无板综合由 `scripts/run_gmii_synth.ps1` 独立完成，报告位于 `build/gmii_synth/`，其 CDC、DRC 和板级限制见 [无板验证记录](pre_board_verification.md)。
 
 ILA 时钟为 clk_50m，采样深度为 1024 个 50 MHz 周期（20.48 微秒）。probe0 至 probe14 依次为 debug_sample_tick、debug_bit、debug_state[4:0]、debug_frame_valid、debug_frame_id[28:0]、debug_frame_ide、debug_frame_rtr、debug_dlc[3:0]、debug_frame_data[63:0]、debug_crc_ok、debug_error、debug_error_code[7:0]、debug_timestamp[31:0]、fifo_valid、fifo_overflow。可先以 debug_frame_valid 上升沿触发检查有效帧的最终字段，再以 debug_error 触发检查错误代码；若要看整帧原始波形，应扩展采样深度，或用外部 CAN 分析仪同步记录，因为默认 ILA 窗口不足以覆盖最长 CAN 帧。
 

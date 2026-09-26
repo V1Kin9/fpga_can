@@ -1,81 +1,47 @@
-# Ethernet MAC TX and clock-domain boundary
+# Ethernet MAC TX 与跨时钟边界
 
-This stage bridges the verified 50 MHz CAN/network application pipeline into a 125 MHz GMII transmit domain without requiring the physical FPGA board.
+便携式顶层 `can_gmii_pipeline_top` 将 50 MHz CAN/网络应用域的完整帧交给 125 MHz GMII 发送域，不依赖实体板卡的 RGMII 或 PHY。
 
-## Architecture
+## 数据路径
 
 ```text
-50 MHz application domain
-CAN RX
-  -> frame queue
-  -> FCAN aggregation
-  -> Ethernet II / IPv4 / UDP frame builder
-  -> eth_frame_cdc_buffer
-                         ||
-                         || bundled-data toggle CDC
-                         \/
-125 MHz network domain
-  -> ethernet_mac_tx
-  -> GMII TXD[7:0] / TX_EN / TX_ER
-  -> [future RGMII DDR + RTL8211E]
+50 MHz 应用域
+CAN RX → 帧队列 → FCAN 打包 → Ethernet II/IPv4/UDP 帧构建
+                                        ↓
+                              eth_frame_cdc_buffer
+                              请求/应答翻转握手
+                                        ↓
+125 MHz GMII 域               ethernet_mac_tx
+                              GMII TXD[7:0] / TX_EN / TX_ER
+                                        ↓
+                              [板级 RGMII / RTL8211E：尚未实现]
 ```
 
-## Frame CDC buffer
+## 完整帧 CDC 缓冲
 
-`eth_frame_cdc_buffer` buffers one complete MAC-client frame before it becomes visible in the 125 MHz domain.
+`eth_frame_cdc_buffer` 一次只容纳一帧 MAC 客户端数据。应用域先握手长度、写完全部字节，再翻转 `req_toggle`。网络域通过 `req_sync1/2` 两级同步器观察请求，然后读取保持稳定的长度和帧内容。整帧消费完成后，网络域翻转 `ack_toggle`；应用域通过 `ack_sync1/2` 两级同步器收到应答，才允许覆盖存储。
 
-The producer:
-1. handshakes frame length,
-2. writes all frame bytes,
-3. toggles a request only after the final byte is safely stored.
+帧存储 `mem[]` 与 `stored_length` 不逐位同步，而遵循 bundled-data 约定：数据先于请求发布，且在应答返回前保持不变。两条翻转同步链均标有 `ASYNC_REG` 和 `SHREG_EXTRACT=NO`。两个时钟域使用共同的外部低有效复位，异步断言、各域同步释放；不支持仅复位其中一个域。
 
-The consumer sees that request through a two-flop synchronizer, then reads a stable frame image. An acknowledgement toggle crosses back after the complete frame is consumed.
+实际字节数与声明长度不符时，缓冲区丢弃该帧并产生一个 `app_protocol_error` 脉冲。超长帧或超出容量的非零长度帧会继续接收直至 `app_tx_last`，丢弃其字节后恢复接受下一帧；零长度帧在首个握手处拒绝。若上游始终不发送非零帧的 `app_tx_last`，仍需系统复位或外部中止策略。
 
-The multi-byte frame RAM and length use a bundled-data CDC contract: they are written before the synchronized request changes and remain stable until the synchronized acknowledgement returns.
+默认容量至少为 512 字节，并随 `MAX_FRAMES_PER_PACKET` 增长。集成帧的最大长度为 `58 + 24 × MAX_FRAMES_PER_PACKET` 字节；若显式设置的 `MAX_ETH_FRAME_BYTES` 小于所需值，超长数据报会被丢弃并报告错误。
 
-Malformed source frames whose actual byte count does not match the announced length are dropped and raise one `app_protocol_error` pulse. A frame that exceeds its announced length, or announces a nonzero length above the storage range, remains ready for input bytes until `app_tx_last` is accepted. Its bytes are discarded rather than published, allowing the producer to finish and the next frame to proceed. A zero-length frame is rejected at the frame handshake because it has no final byte to drain. A producer that never sends `app_tx_last` for a nonzero frame still needs a system reset or an external abort policy.
+综合阶段的 `report_cdc -details` 无法自动证明 bundled-data 握手，将部分数据路径列为 CDC-1/CDC-15。异步时钟组约束也不能代替检查。握手不变量、告警数量及尚需后布线确认的路径见 [无板验证记录](pre_board_verification.md)。
 
-The default MAC-client frame capacity is at least 512 bytes and grows with `MAX_FRAMES_PER_PACKET` when needed. The maximum frame size from the integrated builder is 58 + 24 × `MAX_FRAMES_PER_PACKET` bytes (Ethernet/IPv4/UDP and FCAN headers plus CAN records). If `MAX_ETH_FRAME_BYTES` is explicitly overridden below this size, oversized packets are discarded and reported rather than stalling the pipeline.
+## MAC TX
 
-The request and acknowledgement each cross a two-flop synchronizer marked `ASYNC_REG` and `SHREG_EXTRACT=NO`. The frame bytes and length stay stable from request publication through acknowledgement. Board integration must define both clocks and review the CDC report and routed paths for the bundled data and synchronizer chains; the portable top does not provide physical clock or board timing constraints.
+`ethernet_mac_tx` 从完整帧缓冲区取字节，以 125 MHz 时钟每周期发送一个 GMII 字节，并生成：
 
-## Ethernet MAC TX
+- 7 字节前导码 `55 55 55 55 55 55 55` 和 SFD `D5`；
+- MAC 客户端帧及不足 60 字节时的零填充；
+- IEEE 802.3 CRC32/FCS；
+- 12 字节时间（96 bit）的帧间间隔。
 
-`ethernet_mac_tx` accepts an already-buffered MAC-client frame and emits GMII bytes at one byte per network clock.
+CRC 使用反射多项式 `0xEDB88320`，初始值 `0xFFFFFFFF`，最终取反；FCS 按低字节先发。以太网帧一旦启动，MAC 无法暂停。如果数据阶段上游未提供字节，`gmii_tx_er` 和 `mac_underrun_error` 会标记无效发送。
 
-It generates:
+## GMII 接口与后续板级工作
 
-- seven-byte preamble: `55 55 55 55 55 55 55`
-- SFD: `D5`
-- MAC-client frame bytes
-- zero padding when the frame before FCS is shorter than 60 bytes
-- IEEE 802.3 CRC32/FCS
-- 12 byte-times of inter-frame gap
+顶层输入为 `gmii_clk_125m`，输出为 `gmii_txd[7:0]`、`gmii_tx_en` 和 `gmii_tx_er`。工程当前不生成 125 MHz 时钟；该时钟来源和 RGMII TXC 相位须结合实际板卡与 RTL8211E 确定。
 
-The CRC uses reflected polynomial `0xEDB88320`, initial value `0xFFFFFFFF`, final inversion, and transmits FCS least-significant byte first.
-
-The MAC cannot pause an Ethernet frame after transmission starts. Therefore it is intended to consume only from the complete-frame CDC buffer. If its source ever fails to present a byte in the data state, `GMII_TX_ER` and `underrun_error` signal an invalid transmission.
-
-## GMII boundary
-
-`can_gmii_pipeline_top` exposes:
-
-- `gmii_clk_125m` input
-- `gmii_txd[7:0]`
-- `gmii_tx_en`
-- `gmii_tx_er`
-
-No 125 MHz clock generation is implemented here. On the real Kintex7 Base board that clock and its RGMII phase relationship must be designed together with the RTL8211E interface.
-
-## Remaining board-specific work
-
-The remaining transmit path is intentionally limited to:
-
-1. generate/route the required 125 MHz network clock,
-2. convert GMII bytes/control to RGMII DDR,
-3. apply the board/PHY-specific TX clock delay strategy,
-4. reset/configure RTL8211E (including MDIO only where required),
-5. constrain RGMII pins and source-synchronous timing,
-6. verify physical packets on a PC/Wireshark.
-
-Those items should be completed against the actual board revision and PHY behavior rather than guessed in a hardware-independent PR.
+拿到实体板卡后，依次核对时钟/PHY 连接与延时方案，加入 GMII→RGMII DDR 层、必要的 PHY 复位/MDIO、实际引脚和源同步时序约束，完成布局布线、CDC/DRC/STA 和 PC 端抓包。当前仿真、综合及主机桥接并不等同于物理 Ethernet 链路验证。
