@@ -55,3 +55,18 @@ fifo_valid/fifo_ready 是深度 1 的 ready/valid 缓冲接口；fifo_valid 为 
 ## 范围
 
 支持标准/扩展数据帧及远程帧、Classical CAN 原始 DLC 0 至 15（DLC 9 至 15 保留原值但有效载荷按 8 字节接收）、位填充、CRC-15、ACK/EOF 形式检查、错误后总线空闲恢复和连续帧。当前没有物理板卡联调、CAN FD、发送器、错误帧驱动或多帧存储。后续接 UDP 等输出通道时，可在 fifo_ready/fifo_valid 接口后扩展队列和编码层。
+
+## CAN-over-UDP payload layer
+
+The repository also contains a hardware-independent transport layer for the next stage:
+
+- `can_frame_queue`: configurable multi-frame ready/valid queue (default integration depth 64).
+- `can_udp_payload_packetizer`: batches CAN records into the versioned `FCAN` UDP payload format.
+- `can_udp_pipeline_top`: passive CAN RX → queue → UDP payload request/byte stream.
+- `host/can_udp_decode.py`: PC-side decoder/listener for the same byte contract.
+
+The current RTL stops at the UDP **payload** boundary. Ethernet MAC, IPv4/UDP headers, checksum generation, RGMII DDR I/O and RTL8211E PHY bring-up remain separate board-integration work. See `docs/can_udp_protocol.md`.
+
+Host-side format tests can be run with:
+
+    python -m unittest discover -s host -p 'test_*.py' -v
