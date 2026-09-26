@@ -1,5 +1,8 @@
 # Non-project Vivado 2020.1 synthesis flow. Run from an ASCII directory
 # containing all RTL .v files and gmii_virtual_clocks.xdc.
+set source_dir [string map [list "\\" "/"] [lindex $argv 0]]
+if {$source_dir eq ""} { set source_dir [pwd] }
+cd $source_dir
 read_verilog [glob *.v]
 read_xdc gmii_virtual_clocks.xdc
 synth_design -top can_gmii_pipeline_top -part xc7k325tffg676-2
