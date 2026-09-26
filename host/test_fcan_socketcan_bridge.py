@@ -100,8 +100,28 @@ class BridgeTest(unittest.TestCase):
         self.send(0xFFFFFFFF, fcan_record(0x100))
         self.send(0, fcan_record(0x101))
         self.assertEqual(self.bridge.missing_packets, 0)
+        self.assertEqual(self.bridge.reset_epochs, 0)
         self.assertEqual(self.bridge.previous_seq, 0)
         self.assertEqual(len(self.sink.frames), 2)
+
+    def test_fpga_sequence_restart_accepts_new_epoch(self):
+        self.send(100, fcan_record(0x100))
+        with self.assertLogs("fcan_socketcan_bridge", level="WARNING") as logs:
+            self.send(0, fcan_record(0x101))
+        self.send(1, fcan_record(0x102))
+        self.assertIn("restarted at zero", logs.output[0])
+        self.assertEqual(self.bridge.reset_epochs, 1)
+        self.assertEqual(self.bridge.missing_packets, 0)
+        self.assertEqual([unpack_frame(frame)[0] for frame in self.sink.frames],
+                         [0x100, 0x101, 0x102])
+
+    def test_duplicate_zero_does_not_start_another_epoch(self):
+        self.send(0, fcan_record(0x100))
+        with self.assertLogs("fcan_socketcan_bridge", level="WARNING"):
+            self.send(0, fcan_record(0x101))
+        self.assertEqual(self.bridge.reset_epochs, 0)
+        self.assertEqual(self.bridge.old_packets, 1)
+        self.assertEqual(len(self.sink.frames), 1)
 
     def test_duplicate_and_reordered_datagrams_are_dropped(self):
         self.send(20, fcan_record(0x100))

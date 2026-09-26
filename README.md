@@ -123,7 +123,7 @@ python3 host/fcan_socketcan_bridge.py --bind 0.0.0.0 --port 5000 --interface vca
 candump vcan0
 ```
 
-`--verbose` 打印 FCAN 序号、FPGA 50 MHz 时间戳和原始 DLC。bridge 识别 UDP 丢包、重复和倒序；普通 SocketCAN 时间戳由主机内核产生，不能代表 FPGA SOF 时间。DLC 9～15 在 `can_frame.len` 中钳为 8，原始值仍存在 FCAN 和日志中。测试无需 vcan：
+`--verbose` 打印 FCAN 序号、FPGA 50 MHz 时间戳和原始 DLC。bridge 识别 UDP 丢包、重复、倒序以及 FPGA 序号从 0 重启；普通 SocketCAN 时间戳由主机内核产生，不能代表 FPGA SOF 时间。DLC 9～15 在 `can_frame.len` 中钳为 8，原始值仍存在 FCAN 和日志中。测试无需 vcan：
 
 ```bash
 python3 -m unittest discover -s host -p 'test_*.py' -v

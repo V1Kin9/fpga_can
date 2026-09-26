@@ -91,6 +91,7 @@ class Bridge:
         self.invalid_packets = 0
         self.missing_packets = 0
         self.old_packets = 0
+        self.reset_epochs = 0
 
     def process_datagram(self, payload: bytes) -> int:
         """Decode, check sequence, and forward one FCAN UDP datagram.
@@ -112,11 +113,17 @@ class Bridge:
         if self.previous_seq is not None:
             expected = (self.previous_seq + 1) & 0xFFFFFFFF
             gap = (sequence - expected) & 0xFFFFFFFF
-            if gap >= 0x80000000:
+            if sequence == 0 and expected != 0 and self.previous_seq != 0:
+                # The FPGA packetizer restarts at zero after reset. FCAN v1
+                # has no explicit epoch field, so a new zero is the restart
+                # marker; normal 0xffffffff -> 0 wrap is handled above.
+                self.reset_epochs += 1
+                LOG.warning("FCAN sequence restarted at zero after %u; accepting new epoch", self.previous_seq)
+            elif gap >= 0x80000000:
                 self.old_packets += 1
                 LOG.warning("duplicate/reordered FCAN packet: got=%u expected=%u; dropping", sequence, expected)
                 return 0
-            if gap:
+            elif gap:
                 self.missing_packets += gap
                 LOG.warning("FCAN sequence gap: got=%u expected=%u missing=%u", sequence, expected, gap)
 
@@ -148,9 +155,9 @@ def listen(bind: str, port: int, interface: str, *, verbose: bool = False) -> No
                 bridge.process_datagram(payload)
         except KeyboardInterrupt:
             LOG.info(
-                "stopped: forwarded=%u invalid=%u missing=%u duplicate/reordered=%u",
+                "stopped: forwarded=%u invalid=%u missing=%u duplicate/reordered=%u resets=%u",
                 bridge.forwarded_frames, bridge.invalid_packets,
-                bridge.missing_packets, bridge.old_packets,
+                bridge.missing_packets, bridge.old_packets, bridge.reset_epochs,
             )
 
 

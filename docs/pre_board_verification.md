@@ -67,6 +67,8 @@ Linux [UAPI `can.h`](https://github.com/torvalds/linux/blob/master/include/uapi/
 
 FPGA SOF 时间戳为 50 MHz 计数，1 tick = 20 ns。普通 SocketCAN 写入不能赋予该帧外部 RX 时间戳；`candump` 所见时间由 Linux/vcan 产生。bridge 可用 `--verbose` 打印原始 `fpga_ts`，不伪造内核时间。实际 vcan/candump 贯通测试需在可用 Linux 主机上执行；本轮只运行 fake sink 测试。
 
+FPGA 复位会让 FCAN sequence 从 0 重启。bridge 将正常的 `0xffffffff → 0` 视为环绕，将非环绕的重新到 0 视为新一轮并记录日志；同一个 0 的重复包仍丢弃。FCAN v1 没有 epoch ID，如果新一轮的首个 0 包恰好丢失，接收方无法仅凭序号可靠地区分后续新包和旧包；后续协议版本应加入 epoch/boot ID。
+
 ## 尚未验证与板到手后的次序
 
 - CAN 收发器电气、真实 500 kbit/s 总线、车辆/OBD 捕获以及实体 FPGA 引脚正确性。
