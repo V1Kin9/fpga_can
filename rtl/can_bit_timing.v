@@ -76,6 +76,12 @@ module can_bit_timing #(
                     sync_event  <= 1'b1;
                     resync_used <= 1'b1;
                     if (phase_clock < SAMPLE_CLOCK) begin
+                        // If the edge arrives on the nominal sample clock and
+                        // TSEG1 resynchronization rewinds the phase counter,
+                        // suppress this nominal tick. The bit will be sampled
+                        // once when the adjusted phase reaches the sample point.
+                        if (phase_clock == SAMPLE_CLOCK - 1)
+                            sample_tick <= 1'b0;
                         // An edge in TSEG1 is a positive phase error: lengthen
                         // the current bit by at most SJW so the sample point
                         // moves toward the observed edge.
