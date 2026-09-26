@@ -4,7 +4,7 @@
 
 ## 目录
 
-- rtl：同步、位时序、去填充、帧解析、CRC-15、单帧 ready/valid 缓冲及板级顶层。
+- rtl：输入同步、复位同步、位时序、去填充、帧解析、CRC-15、单帧 ready/valid 缓冲及板级顶层。
 - tb：独立单元仿真与端到端帧激励。
 - constraints：Kintex7_BaseC 引脚与 50 MHz 时钟约束。
 - scripts：Vivado 2020.1 仿真、综合和工程创建入口。
@@ -46,4 +46,4 @@ fifo_valid/fifo_ready 是深度 1 的 ready/valid 缓冲接口；fifo_valid 为 
 
 ## 范围
 
-支持标准/扩展数据帧及远程帧、DLC 0 至 8、位填充、CRC-15、ACK/EOF 形式检查、错误后总线空闲恢复和连续帧。当前没有物理板卡联调、CAN FD、发送器、错误帧驱动或多帧存储。后续接 UDP 等输出通道时，可在 fifo_ready/fifo_valid 接口后扩展队列和编码层。
+支持标准/扩展数据帧及远程帧、Classical CAN 原始 DLC 0 至 15（DLC 9 至 15 保留原值但有效载荷按 8 字节接收）、位填充、CRC-15、ACK/EOF 形式检查、错误后总线空闲恢复和连续帧。当前没有物理板卡联调、CAN FD、发送器、错误帧驱动或多帧存储。后续接 UDP 等输出通道时，可在 fifo_ready/fifo_valid 接口后扩展队列和编码层。
