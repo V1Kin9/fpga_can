@@ -2,7 +2,7 @@
 
 ## 1. 范围与接口
 
-目标为 Kintex-7 XC7K325T-2FFG676C、50 MHz 主时钟、默认 500 kbit/s Classical CAN。can_rx_top 只观察 CAN 收发器 RXD。can_sniffer_top 将 TXD 恒置隐性电平；实体收发器的 Silent 引脚仍需硬件上拉。支持 CAN 2.0A 的 11 位 ID 与 CAN 2.0B 的 29 位 ID，数据帧和远程帧，DLC 0 至 8。
+目标为 Kintex-7 XC7K325T-2FFG676C、50 MHz 主时钟、默认 500 kbit/s Classical CAN。can_rx_top 只观察 CAN 收发器 RXD。can_sniffer_top 将 TXD 恒置隐性电平；实体收发器的 Silent 引脚仍需硬件上拉。支持 CAN 2.0A 的 11 位 ID 与 CAN 2.0B 的 29 位 ID、数据帧和远程帧。保留 4 位原始 DLC；DLC 9 至 15 在 Classical CAN 中仍只接收 8 字节有效载荷。
 
 ## 2. 数据路径与模块职责
 
@@ -12,7 +12,7 @@ can_rx_sync 用两级 ASYNC_REG 触发器降低异步输入亚稳态传播，并
 
 ## 3. 位时序
 
-50 MHz / 500 kbit/s = 每位 100 个时钟。每位分成 10 TQ，每 TQ 10 个时钟：Sync 1 TQ、Prop 5 TQ、Phase1 2 TQ、Phase2 2 TQ。采样位于 8 TQ，即 80%。SJW 为 1 TQ。计时从 SOF 显性边沿硬同步开始；帧内隐性到显性边沿触发最多一次、有界的相位调整，调整量不超过 SJW。参数位于 can_bit_timing，可修改但需满足整数分频和各段总和条件，并重跑仿真。
+50 MHz / 500 kbit/s = 每位 100 个时钟。每位分成 10 TQ，每 TQ 10 个时钟：Sync 1 TQ、Prop 5 TQ、Phase1 2 TQ、Phase2 2 TQ。采样位于 8 TQ，即 80%。SJW 为 1 TQ。计时从 SOF 显性边沿硬同步开始；帧内隐性到显性边沿触发最多一次、有界的相位调整，调整量不超过 SJW。边沿位于采样点之前（TSEG1）时延长当前位，位于采样点之后（TSEG2）时缩短当前位；正负 phase error 的分类以配置的 sample point 为界，而不是固定半 bit。参数位于 can_bit_timing，可修改但需满足整数分频和各段总和条件，并重跑仿真。
 
 两级输入同步会带来固定的若干时钟延迟；SOF 时间戳记录同步后检测到的边沿，而非模拟引脚的绝对到达时刻。主测试覆盖标称速率及发送端相对 ±0.5% 的位时间偏差。
 
@@ -24,7 +24,7 @@ CRC-15 初始化 0，多项式 0x4599，按 CAN 线上 MSB 首先的顺序计算
 
 ## 5. 帧解析
 
-状态依次包括 SOF、11 位基本 ID、RTR/SRR、IDE、可选 18 位扩展 ID 与扩展 RTR、保留位、DLC、可选数据、CRC 序列、CRC delimiter、ACK slot、ACK delimiter、7 位 EOF、3 位 intermission。标准帧的 ID 位于 frame_id[10:0]；扩展帧为 frame_id[28:0]。远程帧保留 DLC 但不读取数据字段。DATA0 存在 frame_data[7:0]，每个字节内按 MSB 首先接收。
+状态依次包括 SOF、11 位基本 ID、RTR/SRR、IDE、可选 18 位扩展 ID 与扩展 RTR、保留位、DLC、可选数据、CRC 序列、CRC delimiter、ACK slot、ACK delimiter、7 位 EOF、3 位 intermission。标准帧的 ID 位于 frame_id[10:0]；扩展帧为 frame_id[28:0]。远程帧保留 DLC 但不读取数据字段。数据帧的原始 DLC 9 至 15 同样保留在 frame_dlc 中，但数据字段只读取 8 字节。DATA0 存在 frame_data[7:0]，每个字节内按 MSB 首先接收。扩展帧还检查 SRR 必须为隐性。
 
 ACK slot 可以是显性或隐性；被动监听器不负责 ACK。CRC delimiter、ACK delimiter 和 EOF 必须为隐性。解析器在第七个 EOF 位正确采样后产生一个时钟的 frame_valid 和 crc_ok；随后检查 intermission。若 intermission 被破坏，会额外产生形式错误事件，已经发出的帧事件不会撤回。
 
@@ -40,10 +40,10 @@ error_valid 和 frame_error 为单周期事件。error_code：0x01 位填充错�
 
 配置 Bank 属性 CFGBVS=VCCO 和 CONFIG_VOLTAGE=3.3 依据板卡原始 XDC 设置。
 
-XDC 指定 G22 50 MHz 时钟、D26 低有效复位、D13 RXD、B14 TXD，I/O 标准为 LVCMOS33。D13/B14 在板卡原设计中兼作 camera2 信号，不能与该相机功能同时使用。将 CANH/CANL 接收发器总线侧，不可直连 FPGA。使用 TJA1051T/3 时，器件 VIO 应为 3.3 V，VCC 为其规定电源；S 脚需在未配置、复位和运行期间均由硬件保持 Silent 电平。接线与供电须按实际收发器版本和开发板原理图复核。
+XDC 指定 G22 50 MHz 时钟、D26 低有效复位、D13 RXD、B14 TXD，I/O 标准为 LVCMOS33。can_rx 通过两级 ASYNC_REG 同步；外部 rst_n 先经过 reset_sync，以异步方式拉低并在 clk_50m 域同步释放。XDC 将这两个外部异步入口从同步时序分析中排除，而内部同步级之间仍由 clk_50m 正常约束。D13/B14 在板卡原设计中兼作 camera2 信号，不能与该相机功能同时使用。将 CANH/CANL 接收发器总线侧，不可直连 FPGA。使用 TJA1051T/3 时，器件 VIO 应为 3.3 V，VCC 为其规定电源；S 脚需在未配置、复位和运行期间均由硬件保持 Silent 电平。接线与供电须按实际收发器版本和开发板原理图复核。
 
 ## 9. 验证和上板步骤
 
-运行 scripts/run_all.ps1，检查七个仿真顶层的 PASS；运行 scripts/run_synth.ps1，检查 build/synth 的利用率、时序和 DRC 报告。使用 scripts/create_project.tcl 建立 Vivado 工程后进行实现和 bitstream。连接总线前先确认 TXD 为隐性且收发器 Silent 已由硬件固定。上板时用 ILA 观测 debug_sample_tick、debug_state、debug_frame_valid、debug_frame_id、debug_dlc、debug_crc_ok、debug_error_code 与 debug_timestamp；依次发送标准、扩展、远程、DLC 0/8 和连续帧，并与外部 CAN 分析仪逐帧比对。
+运行 scripts/run_all.ps1，检查全部仿真顶层的 PASS（包含 sample-point/TSEG1/TSEG2 重同步回归）；运行 scripts/run_synth.ps1，检查 build/synth 的利用率、时序和 DRC 报告。使用 scripts/create_project.tcl 建立 Vivado 工程后进行实现和 bitstream。连接总线前先确认 TXD 为隐性且收发器 Silent 已由硬件固定。上板时用 ILA 观测 debug_sample_tick、debug_state、debug_frame_valid、debug_frame_id、debug_dlc、debug_crc_ok、debug_error_code 与 debug_timestamp；依次发送标准、扩展、远程、DLC 0/8 和连续帧，并与外部 CAN 分析仪逐帧比对。
 
 当前自动测试无法替代收发器电气、布线、终端电阻、总线共模及实际上板误码验证。综合报告为综合后估计，最终时序以实现后的报告为准。
