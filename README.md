@@ -21,7 +21,7 @@ Linux/CI 也可使用 Icarus Verilog 运行同一组 RTL 回归：
 
     bash scripts/run_iverilog.sh
 
-两个脚本默认使用 C:\Xilinx\Vivado\2020.1\bin，可通过 -VivadoBin 指定其他版本。脚本在系统临时目录建立纯 ASCII 路径执行 Vivado，并将综合报告保存到 build/synth。单独运行主测试：
+这些 PowerShell 脚本默认使用 C:\Xilinx\Vivado\2020.1\bin，可通过 -VivadoBin 指定其他版本。脚本在系统临时目录建立纯 ASCII 路径执行 Vivado，并将综合报告保存到 build/synth。单独运行主测试：
 
     .\scripts\run_sim.ps1 -Top tb_can_rx_top
 
@@ -29,7 +29,11 @@ Linux/CI 也可使用 Icarus Verilog 运行同一组 RTL 回归：
 
     C:\Xilinx\Vivado\2020.1\bin\vivado.bat -mode batch -source scripts/create_project.tcl
 
-建议在 Vivado 工程中运行 implementation、检查时序和 DRC 后生成 bitstream。无实体开发板和外部 CAN 收发器连接时，仿真及综合不能证明板上电气行为。
+生成带 ILA 的板级 bitstream 与探针文件：
+
+    .\scripts\run_impl_ila.ps1
+
+脚本按 synth → debug core insertion → opt/place/route → DRC/timing/bus skew → bitstream 执行，产物在 build/impl_ila/can_ila.bit 和 build/impl_ila/can_ila.ltx；同时保留报告和 routed_ila.dcp。ILA 使用 50 MHz 时钟、1024 点深度，探针字段及触发建议见 docs/can_rx_design.md。bitstream 用于上板验证，生成成功不代表实际 CAN 收发器及总线已经验证。
 
 ## 板级连接
 

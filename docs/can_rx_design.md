@@ -44,6 +44,10 @@ XDC 指定 G22 50 MHz 时钟、D26 低有效复位、D13 RXD、B14 TXD，I/O 标
 
 ## 9. 验证和上板步骤
 
-运行 scripts/run_all.ps1，检查全部仿真顶层的 PASS（包含 sample-point/TSEG1/TSEG2 重同步回归）；运行 scripts/run_synth.ps1，检查 build/synth 的利用率、时序和 DRC 报告。使用 scripts/create_project.tcl 建立 Vivado 工程后进行实现和 bitstream。连接总线前先确认 TXD 为隐性且收发器 Silent 已由硬件固定。上板时用 ILA 观测 debug_sample_tick、debug_state、debug_frame_valid、debug_frame_id、debug_dlc、debug_crc_ok、debug_error_code 与 debug_timestamp；依次发送标准、扩展、远程、DLC 0/8 和连续帧，并与外部 CAN 分析仪逐帧比对。
+运行 scripts/run_all.ps1，检查全部仿真顶层的 PASS（包含 sample-point/TSEG1/TSEG2 重同步回归）；运行 scripts/run_synth.ps1，检查 build/synth 的利用率、时序和 DRC 报告。运行 scripts/run_impl_ila.ps1，检查 build/impl_ila 下的 routed_timing.rpt、routed_drc.rpt、routed_bus_skew.rpt、can_ila.bit 和 can_ila.ltx。该脚本使用非工程模式，将 ILA 插入综合后网表，并完成布局布线。若需图形界面工程，可另用 scripts/create_project.tcl 建立。
+
+ILA 时钟为 clk_50m，采样深度为 1024 个 50 MHz 周期（20.48 微秒）。probe0 至 probe14 依次为 debug_sample_tick、debug_bit、debug_state[4:0]、debug_frame_valid、debug_frame_id[28:0]、debug_frame_ide、debug_frame_rtr、debug_dlc[3:0]、debug_frame_data[63:0]、debug_crc_ok、debug_error、debug_error_code[7:0]、debug_timestamp[31:0]、fifo_valid、fifo_overflow。可先以 debug_frame_valid 上升沿触发检查有效帧的最终字段，再以 debug_error 触发检查错误代码；若要看整帧原始波形，应扩展采样深度，或用外部 CAN 分析仪同步记录，因为默认 ILA 窗口不足以覆盖最长 CAN 帧。
+
+连接总线前先确认 TXD 为隐性且收发器 Silent 已由硬件固定。确认引脚、电源、终端电阻及公共地后，将 D13 接收发器 RXD，以外部工具发送 500 kbit/s 的标准、扩展、远程、DLC 0/8/9/15 和连续帧。加载 can_ila.bit 与匹配的 can_ila.ltx，逐帧比对 ID、IDE、RTR、原始 DLC、数据、CRC/错误事件和时间戳；观察 fifo_overflow。若硬件条件允许，先在隔离的测试总线上进行。
 
 当前自动测试无法替代收发器电气、布线、终端电阻、总线共模及实际上板误码验证。综合报告为综合后估计，最终时序以实现后的报告为准。
