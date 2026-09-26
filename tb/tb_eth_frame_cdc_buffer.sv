@@ -26,6 +26,9 @@ module tb_eth_frame_cdc_buffer;
     wire net_tx_last;
 
     integer saw_protocol_error = 0;
+    reg previous_outstanding=0, previous_req=0, previous_ack=0;
+    reg [15:0] previous_length=0;
+    reg previous_net_last=0;
 
     eth_frame_cdc_buffer #(.MAX_FRAME_BYTES(32)) dut (
         .app_clk(app_clk), .app_rst_n(app_rst_n),
@@ -44,6 +47,36 @@ module tb_eth_frame_cdc_buffer;
     always @(posedge app_clk)
         if (app_protocol_error)
             saw_protocol_error = saw_protocol_error + 1;
+
+    // Verification-layer bundled-data handshake properties. Sampling at
+    // posedge observes the state established by the previous edge.
+    always @(posedge app_clk) if (app_rst_n) begin
+        if (dut.req_toggle != dut.ack_sync2 &&
+            (dut.capture_active || app_frame_ready || app_tx_ready))
+            $fatal(1,"CDC producer can overwrite an outstanding frame");
+        if (previous_outstanding && dut.stored_length !== previous_length)
+            $fatal(1,"CDC stored_length changed while request outstanding");
+        if (dut.req_toggle != previous_req && previous_outstanding)
+            $fatal(1,"CDC published next request before synchronized ack");
+        previous_outstanding = (dut.req_toggle != dut.ack_sync2);
+        previous_length = dut.stored_length;
+        previous_req = dut.req_toggle;
+    end else begin
+        previous_outstanding = 0;
+        previous_req = 0;
+    end
+
+    always @(posedge net_clk) if (net_rst_n) begin
+        if (dut.ack_toggle != previous_ack && !previous_net_last)
+            $fatal(1,"CDC acknowledgment without a completed request");
+        if (dut.ack_toggle != dut.req_sync2 && !dut.stream_active && !net_frame_valid)
+            $fatal(1,"CDC acknowledgment toggled without request");
+        previous_ack = dut.ack_toggle;
+        previous_net_last = net_tx_valid && net_tx_ready && net_tx_last;
+    end else begin
+        previous_ack = 0;
+        previous_net_last = 0;
+    end
 
     task start_frame(input [15:0] length);
         integer watchdog;
@@ -226,6 +259,25 @@ module tb_eth_frame_cdc_buffer;
             $fatal(1, "CDC did not recover after malformed frames");
         @(negedge net_clk);
         net_tx_ready = 0;
+
+        // Reset an unpublished CDC frame. It belongs to the aborted epoch
+        // and must not appear after both clock domains leave reset.
+        repeat(6) @(negedge app_clk);
+        start_frame(16'd2);
+        send_byte(8'hDE,0);
+        send_byte(8'hAD,1);
+        wait_net_frame(16'd2);
+        @(negedge app_clk); app_rst_n=0; net_rst_n=0;
+        repeat(4) @(negedge app_clk);
+        app_rst_n=1; net_rst_n=1;
+        repeat(6) @(negedge net_clk);
+        if(net_frame_valid || net_tx_valid)
+            $fatal(1,"CDC leaked pending pre-reset frame");
+        start_frame(16'd1);
+        send_byte(8'hA5,1);
+        wait_net_frame(16'd1);
+        if(net_frame_length!=1)
+            $fatal(1,"CDC new epoch length mismatch");
 
         $display("[PASS] Two-clock Ethernet frame CDC, backpressure, malformed-frame drain and recovery");
         $finish;
