@@ -12,6 +12,8 @@ tops=(
   tb_parser_standard
   tb_crc15
   tb_fifo_if
+  tb_can_frame_queue
+  tb_can_udp_payload_packetizer
   tb_sniffer_top
   tb_can_rx_top
 )
