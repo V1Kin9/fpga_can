@@ -73,7 +73,7 @@ module can_frame_encoder(input wire clk, output reg bus = 1'b1);
             append(0,1); append_bits(id,11); append(rtr,1);
             append(0,1); append(0,1); append_bits(dlc,4);
             if (!rtr)
-                for(i=0;i<dlc;i=i+1)
+                for(i=0;i<((dlc > 8) ? 8 : dlc);i=i+1)
                     append_bits((data >> (i*8)) & 8'hff,8);
             finish_frame(corrupt_crc,corrupt_stuff,corrupt_form);
         end
@@ -90,7 +90,7 @@ module can_frame_encoder(input wire clk, output reg bus = 1'b1);
             append(rtr,1); append(0,1); append(0,1);
             append_bits(dlc,4);
             if (!rtr)
-                for(i=0;i<dlc;i=i+1)
+                for(i=0;i<((dlc > 8) ? 8 : dlc);i=i+1)
                     append_bits((data >> (i*8)) & 8'hff,8);
             finish_frame(0,0,0);
         end
