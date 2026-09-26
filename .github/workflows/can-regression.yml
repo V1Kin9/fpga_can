@@ -10,6 +10,8 @@ on:
 jobs:
   simulation:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: Install Icarus Verilog
