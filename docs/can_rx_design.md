@@ -30,7 +30,7 @@ ACK slot 可以是显性或隐性；被动监听器不负责 ACK。CRC delimiter
 
 ## 6. 错误与恢复
 
-error_valid 和 frame_error 为单周期事件。error_code：0x01 位填充错误，0x02 CRC 错误，0x03 形式错误，0x04 DLC 大于 8，0x05 起始位或内部状态异常。stuff_error 和 form_error 只在相应事件周期有效。出错帧不产生新的 frame_valid。RECOVER 状态连续观察 11 个隐性采样位后回到 IDLE，以避开错误帧尾和总线恢复过程。该模块仅报告接收错误，不生成主动错误帧。
+error_valid 和 frame_error 为单周期事件。error_code：0x01 位填充错误，0x02 CRC 错误，0x03 形式错误，0x05 起始位或内部状态异常。DLC 9 至 15 是合法的 Classical CAN 原始 DLC，不作为接收错误。stuff_error 和 form_error 只在相应事件周期有效。出错帧不产生新的 frame_valid。RECOVER 状态连续观察 11 个隐性采样位后回到 IDLE，以避开错误帧尾和总线恢复过程。该模块仅报告接收错误，不生成主动错误帧。
 
 ## 7. 时间戳与输出缓冲
 
