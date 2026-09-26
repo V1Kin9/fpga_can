@@ -87,6 +87,8 @@ class Bridge:
         self.sink = sink
         self.verbose = verbose
         self.previous_seq: int | None = None
+        self.previous_session: int | None = None
+        self.previous_version: int | None = None
         self.forwarded_frames = 0
         self.invalid_packets = 0
         self.missing_packets = 0
@@ -100,8 +102,6 @@ class Bridge:
         are dropped so the SocketCAN stream remains in sequence order.
         """
         try:
-            if len(payload) >= 16 and payload[12:16] != bytes(4):
-                raise ValueError("FCAN header reserved bytes are non-zero")
             packet = decode_payload(payload)
             frames = [pack_can_frame(record) for record in packet.frames]
         except ValueError as exc:
@@ -110,10 +110,19 @@ class Bridge:
             return 0
 
         sequence = packet.sequence
+        if self.previous_version is not None and (
+            packet.version != self.previous_version or
+            (packet.version == 2 and packet.session_id != self.previous_session)
+        ):
+            self.reset_epochs += 1
+            LOG.warning("FCAN session/version changed: v%s/%s -> v%s/%s",
+                        self.previous_version, self.previous_session,
+                        packet.version, packet.session_id)
+            self.previous_seq = None
         if self.previous_seq is not None:
             expected = (self.previous_seq + 1) & 0xFFFFFFFF
             gap = (sequence - expected) & 0xFFFFFFFF
-            if sequence == 0 and expected != 0 and self.previous_seq != 0:
+            if packet.version == 1 and sequence == 0 and expected != 0 and self.previous_seq != 0:
                 # The FPGA packetizer restarts at zero after reset. FCAN v1
                 # has no explicit epoch field, so a new zero is the restart
                 # marker; normal 0xffffffff -> 0 wrap is handled above.
@@ -128,6 +137,15 @@ class Bridge:
                 LOG.warning("FCAN sequence gap: got=%u expected=%u missing=%u", sequence, expected, gap)
 
         self.previous_seq = sequence
+        self.previous_version = packet.version
+        self.previous_session = packet.session_id
+        for error in packet.errors:
+            LOG.warning("FCAN CAN_ERROR seq=%u code=%u fpga_ts=%u", sequence,
+                        error.error_code, error.timestamp_ticks)
+        for status in packet.statuses:
+            LOG.info("FCAN DEVICE_STATUS seq=%u frames=%u queue_drop=%u diagnostic_drop=%u",
+                     sequence, status.rx_frames_total, status.queue_drop_count,
+                     status.diagnostic_drop_count)
         for record, frame in zip(packet.frames, frames):
             if not record.crc_ok:
                 LOG.warning("seq=%u CAN ID=0x%x has CRC_OK=0; not forwarding", sequence, record.can_id)

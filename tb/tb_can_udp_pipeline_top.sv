@@ -23,11 +23,14 @@ module tb_can_udp_pipeline_top;
     can_udp_pipeline_top #(
         .QUEUE_DEPTH(8),
         .MAX_FRAMES_PER_PACKET(2),
-        .FLUSH_CYCLES(20)
+        .FLUSH_CYCLES(20),
+        .FCAN_PROTOCOL_VERSION(1)
     ) dut (
         .clk_50m(clk),
         .rst_n(rst_n),
         .can_rx(bus),
+        .session_id(32'd0), .cdc_protocol_error(1'b0),
+        .mac_underrun_count(16'd0),
         .can_tx(can_tx),
         .packet_valid(packet_valid),
         .packet_ready(packet_ready),

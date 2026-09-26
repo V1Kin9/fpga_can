@@ -2,11 +2,17 @@
 module can_udp_pipeline_top #(
     parameter integer QUEUE_DEPTH = 64,
     parameter integer MAX_FRAMES_PER_PACKET = 16,
-    parameter integer FLUSH_CYCLES = 50000
+    parameter integer FLUSH_CYCLES = 50000,
+    parameter integer CAN_BITRATE = 500000,
+    parameter integer FCAN_PROTOCOL_VERSION = 2,
+    parameter integer STATUS_INTERVAL_CYCLES = 50000000
 ) (
     input  wire clk_50m,
     input  wire rst_n,
     input  wire can_rx,
+    input  wire [31:0] session_id,
+    input  wire cdc_protocol_error,
+    input  wire [15:0] mac_underrun_count,
     output wire can_tx,
 
     output wire packet_valid,
@@ -42,6 +48,10 @@ module can_udp_pipeline_top #(
     wire [63:0] rx_fifo_timestamp;
     wire rx_fifo_crc_ok;
     wire rx_fifo_overflow;
+    wire rx_frame_valid;
+    wire rx_error_valid;
+    wire [7:0] rx_error_code;
+    wire [63:0] rx_error_timestamp;
 
     wire queue_in_ready;
     wire queue_out_valid;
@@ -54,11 +64,11 @@ module can_udp_pipeline_top #(
     wire [63:0] queue_out_timestamp;
     wire queue_out_crc_ok;
 
-    can_rx_top u_rx (
+    can_rx_top #(.CAN_BITRATE(CAN_BITRATE)) u_rx (
         .clk_50m(clk_50m),
         .rst_n(rst_sync_n),
         .can_rx(can_rx),
-        .frame_valid(),
+        .frame_valid(rx_frame_valid),
         .frame_id(),
         .frame_ide(),
         .frame_rtr(),
@@ -69,8 +79,9 @@ module can_udp_pipeline_top #(
         .stuff_error(),
         .form_error(),
         .frame_error(),
-        .error_valid(),
-        .error_code(),
+        .error_valid(rx_error_valid),
+        .error_code(rx_error_code),
+        .error_timestamp(rx_error_timestamp),
         .fifo_ready(rx_fifo_ready),
         .fifo_valid(rx_fifo_valid),
         .fifo_id(rx_fifo_id),
@@ -88,6 +99,52 @@ module can_udp_pipeline_top #(
 
     assign rx_fifo_ready = queue_in_ready;
     assign frame_drop_event = rx_fifo_overflow;
+
+    wire diagnostic_error_valid;
+    wire diagnostic_error_ready;
+    wire [7:0] diagnostic_error_code;
+    wire [63:0] diagnostic_error_timestamp;
+    wire diagnostic_status_valid;
+    wire diagnostic_status_ready;
+    wire [7:0] status_flags;
+    wire [7:0] status_queue_level;
+    wire [7:0] status_queue_high_watermark;
+    wire [63:0] status_uptime_ticks;
+    wire [127:0] status_counters;
+
+    generate if (FCAN_PROTOCOL_VERSION == 2) begin : g_diagnostics
+        can_diagnostics #(.STATUS_INTERVAL_CYCLES(STATUS_INTERVAL_CYCLES)) u_diagnostics (
+            .clk(clk_50m), .rst_n(rst_sync_n),
+            .frame_valid(rx_frame_valid),
+            .error_valid(rx_error_valid), .error_code(rx_error_code),
+            .event_timestamp(rx_error_timestamp),
+            .queue_drop_event(rx_fifo_overflow),
+            .cdc_protocol_error(cdc_protocol_error),
+            .mac_underrun_count(mac_underrun_count),
+            .queue_level(queue_level),
+            .diagnostic_error_valid(diagnostic_error_valid),
+            .diagnostic_error_ready(diagnostic_error_ready),
+            .diagnostic_error_code(diagnostic_error_code),
+            .diagnostic_error_timestamp(diagnostic_error_timestamp),
+            .diagnostic_status_valid(diagnostic_status_valid),
+            .diagnostic_status_ready(diagnostic_status_ready),
+            .status_flags(status_flags),
+            .status_queue_level(status_queue_level),
+            .status_queue_high_watermark(status_queue_high_watermark),
+            .status_uptime_ticks(status_uptime_ticks),
+            .status_counters(status_counters)
+        );
+    end else begin : g_no_diagnostics
+        assign diagnostic_error_valid = 1'b0;
+        assign diagnostic_error_code = 8'd0;
+        assign diagnostic_error_timestamp = 64'd0;
+        assign diagnostic_status_valid = 1'b0;
+        assign status_flags = 8'd0;
+        assign status_queue_level = 8'd0;
+        assign status_queue_high_watermark = 8'd0;
+        assign status_uptime_ticks = 64'd0;
+        assign status_counters = 128'd0;
+    end endgenerate
 
     can_frame_queue #(
         .DEPTH(QUEUE_DEPTH)
@@ -117,7 +174,8 @@ module can_udp_pipeline_top #(
 
     can_udp_payload_packetizer #(
         .MAX_FRAMES(MAX_FRAMES_PER_PACKET),
-        .FLUSH_CYCLES(FLUSH_CYCLES)
+        .FLUSH_CYCLES(FLUSH_CYCLES),
+        .FCAN_PROTOCOL_VERSION(FCAN_PROTOCOL_VERSION)
     ) u_packetizer (
         .clk(clk_50m),
         .rst_n(rst_sync_n),
@@ -130,6 +188,18 @@ module can_udp_pipeline_top #(
         .frame_data(queue_out_data),
         .frame_timestamp(queue_out_timestamp),
         .frame_crc_ok(queue_out_crc_ok),
+        .session_id(session_id),
+        .error_valid(diagnostic_error_valid),
+        .error_ready(diagnostic_error_ready),
+        .error_code(diagnostic_error_code),
+        .error_timestamp(diagnostic_error_timestamp),
+        .status_valid(diagnostic_status_valid),
+        .status_ready(diagnostic_status_ready),
+        .status_flags(status_flags),
+        .status_queue_level(status_queue_level),
+        .status_queue_high_watermark(status_queue_high_watermark),
+        .status_uptime_ticks(status_uptime_ticks),
+        .status_counters(status_counters),
         .packet_valid(packet_valid),
         .packet_ready(packet_ready),
         .packet_length(packet_length),
