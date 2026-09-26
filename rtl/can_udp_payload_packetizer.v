@@ -90,9 +90,9 @@ module can_udp_payload_packetizer #(
                 2:  tx_data = 8'h41; // A
                 3:  tx_data = 8'h4e; // N
                 4:  tx_data = 8'h01; // protocol version
-                5:  tx_data = HEADER_BYTES[7:0];
-                6:  tx_data = RECORD_BYTES[7:0];
-                7:  tx_data = frame_count[7:0];
+                5:  tx_data = HEADER_BYTES;
+                6:  tx_data = RECORD_BYTES;
+                7:  tx_data = frame_count;
                 8:  tx_data = sequence_counter[31:24];
                 9:  tx_data = sequence_counter[23:16];
                 10: tx_data = sequence_counter[15:8];
