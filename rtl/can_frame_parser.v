@@ -35,13 +35,14 @@ module can_frame_parser #(
                      ACK_DELIM=14, EOF_FIELD=15, INTERMISSION=16,
                      RECOVER=17;
     localparam [7:0] ERR_STUFF=8'h01, ERR_CRC=8'h02, ERR_FORM=8'h03,
-                     ERR_DLC=8'h04, ERR_ABORT=8'h05;
+                     ERR_ABORT=8'h05;
 
     reg [4:0] state;
     reg [5:0] bit_count;
     reg [3:0] byte_count;
     reg [14:0] received_crc;
     reg [3:0] idle_count;
+    wire [3:0] data_length = (frame_dlc > 4'd8) ? 4'd8 : frame_dlc;
 
     assign debug_state = state;
     assign hard_sync_enable = (state == IDLE);
@@ -94,6 +95,7 @@ module can_frame_parser #(
                 received_crc <= 0;
                 bit_count    <= 0;
                 byte_count   <= 0;
+                crc_clear     <= 1'b1;
             end else if (destuff_error && state != IDLE && state != RECOVER) begin
                 state       <= RECOVER;
                 idle_count  <= 0;
@@ -108,7 +110,6 @@ module can_frame_parser #(
                     end
                     SOF: begin
                         if (!bit_value) begin
-                            crc_clear     <= 1;
                             crc_bit_valid <= 1;
                             crc_bit       <= 0;
                             state         <= BASE_ID;
@@ -140,10 +141,20 @@ module can_frame_parser #(
                         crc_bit_valid <= 1;
                         crc_bit       <= bit_value;
                         if (bit_value) begin
-                            frame_ide <= 1;
-                            frame_rtr <= 0; // previous bit was SRR, not RTR
-                            bit_count <= 0;
-                            state     <= EXT_ID;
+                            if (!frame_rtr) begin
+                                // Extended frames require recessive SRR.
+                                state       <= RECOVER;
+                                idle_count  <= 0;
+                                error_valid <= 1;
+                                error_code  <= ERR_FORM;
+                                form_error  <= 1;
+                                frame_error <= 1;
+                            end else begin
+                                frame_ide <= 1;
+                                frame_rtr <= 0; // previous bit was SRR, not RTR
+                                bit_count <= 0;
+                                state     <= EXT_ID;
+                            end
                         end else state <= R0;
                     end
                     EXT_ID: begin
@@ -194,13 +205,7 @@ module can_frame_parser #(
                         frame_dlc     <= {frame_dlc[2:0], bit_value};
                         if (bit_count == 3) begin
                             bit_count <= 0;
-                            if ({frame_dlc[2:0], bit_value} > 8) begin
-                                state       <= RECOVER;
-                                idle_count  <= 0;
-                                error_valid <= 1;
-                                error_code  <= ERR_DLC;
-                                frame_error <= 1;
-                            end else if (frame_rtr || {frame_dlc[2:0], bit_value} == 0) begin
+                            if (frame_rtr || {frame_dlc[2:0], bit_value} == 0) begin
                                 state <= CRC;
                             end else begin
                                 state      <= DATA;
@@ -214,7 +219,7 @@ module can_frame_parser #(
                         frame_data[byte_count*8 + (7-bit_count[2:0])] <= bit_value;
                         if (bit_count == 7) begin
                             bit_count <= 0;
-                            if (byte_count == frame_dlc - 1'b1)
+                            if (byte_count == data_length - 1'b1)
                                 state <= CRC;
                             else byte_count <= byte_count + 1'b1;
                         end else bit_count <= bit_count + 1'b1;

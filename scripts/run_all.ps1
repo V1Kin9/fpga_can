@@ -5,6 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 $tops = @(
     "tb_bit_timing",
+    "tb_bit_timing_resync",
     "tb_destuff",
     "tb_parser_standard",
     "tb_crc15",
