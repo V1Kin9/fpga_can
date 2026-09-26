@@ -47,17 +47,19 @@ module tb_eth_frame_cdc_buffer;
 
     task start_frame(input [15:0] length);
         integer watchdog;
+        reg accepted;
         begin
             app_frame_length = length;
             app_frame_valid = 1;
             watchdog = 0;
-            while (!app_frame_ready && watchdog < 100) begin
-                @(negedge app_clk);
+            accepted = 0;
+            while (!accepted && watchdog < 100) begin
+                @(posedge app_clk);
+                accepted = app_frame_ready;
                 watchdog = watchdog + 1;
             end
-            if (!app_frame_ready)
+            if (!accepted)
                 $fatal(1, "CDC app frame-ready timeout");
-            @(posedge app_clk);
             @(negedge app_clk);
             app_frame_valid = 0;
         end
@@ -65,18 +67,20 @@ module tb_eth_frame_cdc_buffer;
 
     task send_byte(input [7:0] value, input last);
         integer watchdog;
+        reg accepted;
         begin
             app_tx_data = value;
             app_tx_last = last;
             app_tx_valid = 1;
             watchdog = 0;
-            while (!app_tx_ready && watchdog < 100) begin
-                @(negedge app_clk);
+            accepted = 0;
+            while (!accepted && watchdog < 100) begin
+                @(posedge app_clk);
+                accepted = app_tx_ready;
                 watchdog = watchdog + 1;
             end
-            if (!app_tx_ready)
+            if (!accepted)
                 $fatal(1, "CDC app byte-ready timeout");
-            @(posedge app_clk);
             @(negedge app_clk);
             app_tx_valid = 0;
             app_tx_last = 0;
@@ -99,6 +103,9 @@ module tb_eth_frame_cdc_buffer;
 
     integer i;
     integer recv_count;
+    integer recv_watchdog;
+    integer stalled_once;
+    integer error_before;
 
     initial begin
         repeat (4) @(negedge app_clk);
@@ -124,22 +131,30 @@ module tb_eth_frame_cdc_buffer;
         net_frame_ready = 0;
 
         recv_count = 0;
-        while (recv_count < 5) begin
-            net_tx_ready = (recv_count != 2); // one-cycle backpressure
+        recv_watchdog = 0;
+        stalled_once = 0;
+        while (recv_count < 5 && recv_watchdog < 20) begin
             @(negedge net_clk);
-            if (net_tx_valid && net_tx_ready) begin
+            net_tx_ready = (recv_count != 2 || stalled_once != 0);
+            if (recv_count == 2 && stalled_once == 0)
+                stalled_once = 1;
+            @(posedge net_clk);
+            if (!net_tx_valid)
+                $fatal(1, "CDC stream ended before byte %0d", recv_count);
+            if (net_tx_ready) begin
                 if (net_tx_data !== (8'hA0 + recv_count))
                     $fatal(1, "CDC byte[%0d]=%02h", recv_count, net_tx_data);
                 if (net_tx_last !== (recv_count == 4))
                     $fatal(1, "CDC last mismatch index=%0d last=%b",
                            recv_count, net_tx_last);
                 recv_count = recv_count + 1;
-            end
-            if (recv_count == 2) begin
-                // Release after one stalled cycle.
-                net_tx_ready = 1;
-            end
+            end else if (net_tx_data !== 8'hA2 || net_tx_last)
+                $fatal(1, "CDC changed byte while backpressured");
+            recv_watchdog = recv_watchdog + 1;
         end
+        if (recv_count != 5 || stalled_once != 1)
+            $fatal(1, "CDC receive/backpressure timeout");
+        @(negedge net_clk);
         net_tx_ready = 0;
 
         // Allow acknowledgement to cross back before starting another frame.
@@ -153,17 +168,66 @@ module tb_eth_frame_cdc_buffer;
 
         // Announce four bytes but terminate after two. The malformed frame must
         // be dropped and never become visible in the net domain.
+        error_before = saw_protocol_error;
         start_frame(16'd4);
         send_byte(8'h11,0);
         send_byte(8'h22,1);
         repeat (6) @(negedge app_clk);
         repeat (10) @(negedge net_clk);
-        if (saw_protocol_error == 0)
-            $fatal(1, "CDC malformed frame did not raise protocol error");
+        if (saw_protocol_error != error_before + 1)
+            $fatal(1, "CDC short frame did not raise one protocol error");
         if (net_frame_valid)
             $fatal(1, "CDC published malformed short frame");
 
-        $display("[PASS] Two-clock Ethernet frame CDC, backpressure, malformed-frame drop");
+        // An overlong frame must remain drainable through its final byte.
+        // Otherwise an upstream producer waiting for ready can never finish.
+        error_before = saw_protocol_error;
+        start_frame(16'd2);
+        send_byte(8'h31,0);
+        send_byte(8'h32,0);
+        send_byte(8'h33,0);
+        send_byte(8'h34,1);
+        repeat (6) @(negedge app_clk);
+        if (saw_protocol_error != error_before + 1)
+            $fatal(1, "CDC overlong frame did not raise one protocol error");
+        if (net_frame_valid)
+            $fatal(1, "CDC published malformed overlong frame");
+
+        // An unsupported announced length must be accepted and drained too.
+        error_before = saw_protocol_error;
+        start_frame(16'd33);
+        for (i=0; i<33; i=i+1)
+            send_byte(i[7:0], i==32);
+        repeat (6) @(negedge app_clk);
+        if (saw_protocol_error != error_before + 1)
+            $fatal(1, "CDC oversized frame did not raise one protocol error");
+        if (net_frame_valid)
+            $fatal(1, "CDC published oversized frame");
+
+        // A zero-length frame has no bytes to drain and must be rejected at
+        // the frame handshake without blocking the following valid frame.
+        error_before = saw_protocol_error;
+        start_frame(16'd0);
+        repeat (3) @(negedge app_clk);
+        if (saw_protocol_error != error_before + 1 || net_frame_valid)
+            $fatal(1, "CDC zero-length frame was not rejected cleanly");
+
+        // A correct frame must still cross after all malformed cases.
+        start_frame(16'd1);
+        send_byte(8'h5A,1);
+        wait_net_frame(16'd1);
+        net_frame_ready = 1;
+        @(posedge net_clk);
+        @(negedge net_clk);
+        net_frame_ready = 0;
+        net_tx_ready = 1;
+        @(posedge net_clk);
+        if (!net_tx_valid || net_tx_data !== 8'h5A || !net_tx_last)
+            $fatal(1, "CDC did not recover after malformed frames");
+        @(negedge net_clk);
+        net_tx_ready = 0;
+
+        $display("[PASS] Two-clock Ethernet frame CDC, backpressure, malformed-frame drain and recovery");
         $finish;
     end
 endmodule

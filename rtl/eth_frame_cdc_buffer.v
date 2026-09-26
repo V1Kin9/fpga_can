@@ -45,12 +45,13 @@ module eth_frame_cdc_buffer #(
     reg [7:0] mem [0:MAX_FRAME_BYTES-1];
 
     reg req_toggle;
-    reg ack_sync1, ack_sync2;
+    (* ASYNC_REG = "TRUE", SHREG_EXTRACT = "NO" *) reg ack_sync1, ack_sync2;
     reg capture_active;
+    reg discard_active;
     reg [ADDR_WIDTH:0] wr_count;
     reg [15:0] stored_length;
 
-    reg req_sync1, req_sync2;
+    (* ASYNC_REG = "TRUE", SHREG_EXTRACT = "NO" *) reg req_sync1, req_sync2;
     reg ack_toggle;
     reg stream_active;
     reg [ADDR_WIDTH:0] rd_count;
@@ -60,8 +61,9 @@ module eth_frame_cdc_buffer #(
     wire length_supported = (app_frame_length != 0) &&
                             (app_frame_length <= MAX_FRAME_BYTES);
 
-    assign app_frame_ready = !capture_active && buffer_free && length_supported;
-    assign app_tx_ready = capture_active && (wr_count < MAX_FRAME_BYTES);
+    assign app_frame_ready = !capture_active && !discard_active && buffer_free;
+    assign app_tx_ready = discard_active ||
+                          (capture_active && (wr_count < MAX_FRAME_BYTES));
 
     assign net_frame_valid = (req_sync2 != ack_toggle) && !stream_active;
     assign net_frame_length = stored_length;
@@ -80,6 +82,7 @@ module eth_frame_cdc_buffer #(
             ack_sync1         <= 1'b0;
             ack_sync2         <= 1'b0;
             capture_active    <= 1'b0;
+            discard_active    <= 1'b0;
             wr_count          <= {(ADDR_WIDTH+1){1'b0}};
             stored_length     <= 16'd0;
             app_protocol_error <= 1'b0;
@@ -88,13 +91,21 @@ module eth_frame_cdc_buffer #(
             ack_sync2 <= ack_sync1;
             app_protocol_error <= 1'b0;
 
-            if (!capture_active) begin
-                if (app_frame_valid && buffer_free) begin
+            if (discard_active) begin
+                // Keep accepting a rejected frame until its final byte so the
+                // producer can leave its streaming state and send another one.
+                if (app_tx_valid && app_tx_last)
+                    discard_active <= 1'b0;
+            end else if (!capture_active) begin
+                if (app_frame_valid && app_frame_ready) begin
                     if (length_supported) begin
                         capture_active <= 1'b1;
                         wr_count <= {(ADDR_WIDTH+1){1'b0}};
                         stored_length <= app_frame_length;
                     end else begin
+                        // A zero-length frame has no final byte to drain.
+                        if (app_frame_length != 0)
+                            discard_active <= 1'b1;
                         app_protocol_error <= 1'b1;
                     end
                 end
@@ -110,9 +121,11 @@ module eth_frame_cdc_buffer #(
                         req_toggle <= ~req_toggle;
                     end
                 end else if (wr_count + 1'b1 >= stored_length) begin
-                    // Drop a source that exceeded its announced length.
+                    // Do not publish an overlong frame. Drain its remaining
+                    // bytes through app_tx_last before accepting another frame.
                     app_protocol_error <= 1'b1;
                     capture_active <= 1'b0;
+                    discard_active <= 1'b1;
                 end else begin
                     wr_count <= wr_count + 1'b1;
                 end

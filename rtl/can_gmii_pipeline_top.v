@@ -3,7 +3,10 @@ module can_gmii_pipeline_top #(
     parameter integer QUEUE_DEPTH = 64,
     parameter integer MAX_FRAMES_PER_PACKET = 16,
     parameter integer FLUSH_CYCLES = 50000,
-    parameter integer MAX_ETH_FRAME_BYTES = 512,
+    // Ethernet/IP/UDP headers (42) + FCAN header (16) + 24 per CAN frame.
+    parameter integer MAX_ETH_FRAME_BYTES =
+        (512 > 58 + 24*MAX_FRAMES_PER_PACKET) ?
+        512 : 58 + 24*MAX_FRAMES_PER_PACKET,
     parameter [47:0] SRC_MAC = 48'h020000000001,
     parameter [47:0] DST_MAC = 48'h020000000002,
     parameter [31:0] SRC_IP  = 32'hC0A83202,

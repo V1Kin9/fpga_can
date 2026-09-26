@@ -33,9 +33,11 @@ The consumer sees that request through a two-flop synchronizer, then reads a sta
 
 The multi-byte frame RAM and length use a bundled-data CDC contract: they are written before the synchronized request changes and remain stable until the synchronized acknowledgement returns.
 
-Malformed source frames whose actual byte count does not match the announced length are dropped and raise `app_protocol_error`.
+Malformed source frames whose actual byte count does not match the announced length are dropped and raise one `app_protocol_error` pulse. A frame that exceeds its announced length, or announces a nonzero length above the storage range, remains ready for input bytes until `app_tx_last` is accepted. Its bytes are discarded rather than published, allowing the producer to finish and the next frame to proceed. A zero-length frame is rejected at the frame handshake because it has no final byte to drain. A producer that never sends `app_tx_last` for a nonzero frame still needs a system reset or an external abort policy.
 
-Default maximum MAC-client frame storage is 512 bytes. The current maximum FCAN Ethernet frame is below this limit.
+The default MAC-client frame capacity is at least 512 bytes and grows with `MAX_FRAMES_PER_PACKET` when needed. The maximum frame size from the integrated builder is 58 + 24 × `MAX_FRAMES_PER_PACKET` bytes (Ethernet/IPv4/UDP and FCAN headers plus CAN records). If `MAX_ETH_FRAME_BYTES` is explicitly overridden below this size, oversized packets are discarded and reported rather than stalling the pipeline.
+
+The request and acknowledgement each cross a two-flop synchronizer marked `ASYNC_REG` and `SHREG_EXTRACT=NO`. The frame bytes and length stay stable from request publication through acknowledgement. Board integration must define both clocks and review the CDC report and routed paths for the bundled data and synchronizer chains; the portable top does not provide physical clock or board timing constraints.
 
 ## Ethernet MAC TX
 
