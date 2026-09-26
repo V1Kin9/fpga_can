@@ -75,14 +75,18 @@ module can_bit_timing #(
                 if (edge_detect && resync_enable && !resync_used) begin
                     sync_event  <= 1'b1;
                     resync_used <= 1'b1;
-                    if (phase_clock < CLOCKS_PER_BIT / 2) begin
-                        // An edge after the nominal boundary lengthens this bit.
+                    if (phase_clock < SAMPLE_CLOCK) begin
+                        // An edge in TSEG1 is a positive phase error: lengthen
+                        // the current bit by at most SJW so the sample point
+                        // moves toward the observed edge.
                         if (phase_clock <= SJW_CLOCKS)
                             phase_clock <= {COUNTER_WIDTH{1'b0}};
                         else
                             phase_clock <= phase_clock - SJW_CLOCKS;
                     end else begin
-                        // An edge before the boundary shortens the prior bit.
+                        // An edge in TSEG2 is a negative phase error: shorten
+                        // the current bit by at most SJW so the next boundary
+                        // moves toward the observed edge.
                         if (phase_clock >= CLOCKS_PER_BIT - SJW_CLOCKS) begin
                             phase_clock  <= {COUNTER_WIDTH{1'b0}};
                             bit_boundary <= 1'b1;
