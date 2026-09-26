@@ -17,6 +17,10 @@
     .\scripts\run_all.ps1
     .\scripts\run_synth.ps1
 
+Linux/CI 也可使用 Icarus Verilog 运行同一组 RTL 回归：
+
+    bash scripts/run_iverilog.sh
+
 两个脚本默认使用 C:\Xilinx\Vivado\2020.1\bin，可通过 -VivadoBin 指定其他版本。脚本在系统临时目录建立纯 ASCII 路径执行 Vivado，并将综合报告保存到 build/synth。单独运行主测试：
 
     .\scripts\run_sim.ps1 -Top tb_can_rx_top
