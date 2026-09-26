@@ -9,6 +9,13 @@ module can_sniffer_top (
     // high in hardware to guarantee silent operation during FPGA startup.
     assign can_tx = 1'b1;
 
+    wire rst_sync_n;
+    reset_sync u_reset_sync (
+        .clk(clk_50m),
+        .arst_n(rst_n),
+        .srst_n(rst_sync_n)
+    );
+
     (* MARK_DEBUG = "TRUE" *) wire debug_sample_tick;
     (* MARK_DEBUG = "TRUE" *) wire debug_bit;
     (* MARK_DEBUG = "TRUE" *) wire [4:0] debug_state;
@@ -33,7 +40,7 @@ module can_sniffer_top (
     wire [63:0] fifo_data, fifo_timestamp;
 
     can_rx_top u_rx (
-        .clk_50m(clk_50m), .rst_n(rst_n), .can_rx(can_rx),
+        .clk_50m(clk_50m), .rst_n(rst_sync_n), .can_rx(can_rx),
         .frame_valid(debug_frame_valid), .frame_id(debug_frame_id),
         .frame_ide(debug_frame_ide), .frame_rtr(debug_frame_rtr),
         .frame_dlc(debug_dlc), .frame_data(debug_frame_data),
