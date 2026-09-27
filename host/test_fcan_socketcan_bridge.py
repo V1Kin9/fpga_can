@@ -34,6 +34,29 @@ def fcan_packet(sequence, *records):
     )
 
 
+def fcan_v2_record(can_id=0x321, *, ide=False, rtr=False, dlc=8,
+                   data=bytes.fromhex("11 22 33 44 55 66 77 88"),
+                   timestamp=0x0102030405060708, crc_ok=True):
+    flags = int(ide) | (int(rtr) << 1) | (int(crc_ok) << 2)
+    return (
+        bytes([0, flags, dlc, 0])
+        + can_id.to_bytes(4, "big")
+        + timestamp.to_bytes(8, "big")
+        + data.ljust(8, b"\x00")
+        + bytes(8)
+    )
+
+
+def fcan_v2_packet(sequence, session, *records):
+    return (
+        b"FCAN" + bytes([2, 20, 32, len(records)])
+        + sequence.to_bytes(4, "big")
+        + session.to_bytes(4, "big")
+        + bytes(4)
+        + b"".join(records)
+    )
+
+
 def unpack_frame(frame):
     assert len(frame) == 16
     return int.from_bytes(frame[:4], sys.byteorder), frame[4], frame[5:8], frame[8:16]
