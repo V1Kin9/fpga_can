@@ -109,7 +109,7 @@ CAN RX → 单帧缓冲 → 多帧队列 → FCAN 打包器 → 数据报请求/
 python3 host/can_udp_decode.py --bind 0.0.0.0 --port 5000
 ```
 
-`can_udp_decode.py` 校验 magic、版本、头/记录长度、保留位、ID 范围和载荷总长度。`fcan_socketcan_bridge.py` 只把 CRC 正确的 CAN_FRAME 写入 Linux SocketCAN；CAN_ERROR/DEVICE_STATUS 以日志报告。普通 `can_frame.len` 将 DLC 9～15 钳为 8。bridge 检测序号间隙、重复、倒序和自然环绕；v1 对非环绕的序号归零采用启发式重启判断，v2 按 session ID 切换。v1 若复位后的首个零序号包丢失，仍无法无歧义判断新轮次。离线抓包工具见 [诊断架构](diagnostics.md)。
+`can_udp_decode.py` 校验 magic、版本、头/记录长度、保留位、ID 范围和载荷总长度。`fcan_socketcan_bridge.py` 只把 CRC 正确的 CAN_FRAME 写入 Linux SocketCAN；CAN_ERROR/DEVICE_STATUS 以日志报告。普通 `can_frame.len` 将 DLC 9～15 钳为 8。bridge 检测序号间隙、重复、倒序和自然环绕；v2 session ID 改变时关闭旧 session，之后到达的旧 session 延迟包会被丢弃，避免重新注入陈旧 CAN 帧。v1 以及复用同一 session ID 的 v2 流都对非环绕的序号归零采用启发式重启判断；若同一 session 重启后的零号包丢失，仍无法无歧义判断新轮次，因此板级 session ID 仍应尽量保证每次启动不同。离线抓包工具见 [诊断架构](diagnostics.md)。
 
 ## 验证边界
 
