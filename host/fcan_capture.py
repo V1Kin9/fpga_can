@@ -36,7 +36,9 @@ class PcapngWriter:
         # SHB: byte-order magic, version 1.0, unspecified section length.
         stream.write(_block(0x0A0D0D0A, struct.pack("<IHHq", 0x1A2B3C4D, 1, 0, -1)))
         # IDB: linktype 227, snaplen 16; if_name=2, if_tsresol=9 (10^-9 s).
-        options = _option(2, interface.encode("utf-8")) + _option(9, b"\x09")
+        options = (_option(2, interface.encode("utf-8")) +
+                   _option(9, b"\x09") +
+                   _option(0, b""))
         stream.write(_block(1, struct.pack("<HHI", LINKTYPE_CAN_SOCKETCAN, 0, 16) + options))
 
     def write_frame(self, record: CanRecord, epoch_ns: int, host_arrival_ns: int,
@@ -44,14 +46,16 @@ class PcapngWriter:
         can_id = record.can_id | (CAN_EFF_FLAG if record.ide else 0)
         can_id |= CAN_RTR_FLAG if record.rtr else 0
         dlc = min(record.dlc, 8)
+        len8_dlc = record.dlc if dlc == 8 and record.dlc > 8 else 0
         data = bytes(8) if record.rtr else record.payload.ljust(8, b"\x00")
         # LINKTYPE_CAN_SOCKETCAN stores CAN ID in network byte order, unlike
         # the native-endian Linux socket ABI used by fcan_socketcan_bridge.
-        frame = struct.pack(">I", can_id) + bytes((dlc, 0, 0, 0)) + data
+        # Preserve Classical raw DLC 9..15 in can_frame.len8_dlc when len=8.
+        frame = struct.pack(">I", can_id) + bytes((dlc, 0, 0, len8_dlc)) + data
         comment = (f"fpga_sof_ticks={record.timestamp_ticks};host_arrival_ns={host_arrival_ns};"
                    f"session_id={session_id if session_id is not None else 'v1'}").encode("ascii")
         body = (struct.pack("<IIIII", 0, epoch_ns >> 32, epoch_ns & 0xFFFFFFFF, 16, 16)
-                + frame + _option(1, comment))
+                + frame + _option(1, comment) + _option(0, b""))
         self.stream.write(_block(6, body))
 
 
