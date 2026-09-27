@@ -30,7 +30,7 @@ GMII 综合报告位于本地忽略目录 `build/gmii_synth/`：`utilization.rpt
 | UDP/IPv4/Ethernet II 字节序与长度、IPv4 checksum | 完整 CAN→GMII golden 字节比较 |
 | preamble/SFD、以太网 FCS、96-bit IFG | 独立多项式方向的 FCS 参考、完整 GMII 字节比较、IFG 断言 |
 | 50→125 MHz 帧 CDC 功能 | 20 ns/8 ns 独立时钟；32 帧持续输入期间强制网络帧入口 backpressure，检查队列非空和 CDC busy；恢复后无丢失、乱序、重复及字节错误 |
-| FCAN 主机解码器、SocketCAN 转换和抓包 | 28 项主机单元测试使用模拟输出端，无需 vcan 权限；覆盖 v1/v2、session 切换、类型记录、PCAPNG block/SocketCAN 字节布局、compact log 和无效包 |
+| FCAN 主机解码器、SocketCAN 转换和抓包 | 主机单元测试使用模拟输出端，无需 vcan 权限；覆盖 v1/v2、session 切换/同 session 序号归零、旧 session 延迟包拒绝、类型记录、PCAPNG option 终止、raw DLC 的 len8_dlc、SocketCAN 字节布局、compact log 和无效包 |
 | Vivado 网络顶层综合 | 本轮 `can_gmii_pipeline_top` 重新综合并生成网表和全部报告，综合引擎 0 error / 0 critical warning；无推导锁存器、无组合环；没有发现多驱动网络 |
 
 完整回归使用现有 CAN bitstream encoder，其中包含标准 ID `0x321`/DLC8/`11 22 33 44 55 66 77 88`、扩展 ID `0x18DAF110`/DLC2/`AA BB`、DLC0、DLC15、RTR，以及 ID `0x100` 开始的 32 帧。比较覆盖前导码到 FCS 的全部 94 字节、包序号、SOF 时间戳、IFG 与错误信号。测试中的 32 帧积压通过仿真控制网络帧接收端构造；它验证缓冲逻辑，不能证明实体链路的流量性能。
@@ -68,11 +68,11 @@ Vivado `report_cdc -details` 识别请求与应答各两级 `ASYNC_REG`/`SHREG_E
 
 ## 主机 SocketCAN ABI 与时间戳
 
-Linux [UAPI `can.h`](https://github.com/torvalds/linux/blob/master/include/uapi/linux/can.h) 定义 16 字节 Classical `struct can_frame`：native-endian 32-bit `can_id`、`len`、三个单字节 pad/reserved/`len8_dlc`、8 字节数据；`data` 位于偏移 8。bridge 显式封装为 `=IBBBB8s` 并由测试检查全部 16 字节。标准/扩展和 RTR 标志分别按 Linux UAPI 置位。raw DLC 9～15 在普通 `len` 字段钳为 8，`len8_dlc` 保持零；原始 DLC 仍在 FCAN 及 verbose 日志中，不依赖可选的 `CAN_CTRLMODE_CC_LEN8_DLC`。RTR 保留请求长度，数据清零。
+Linux [UAPI `can.h`](https://github.com/torvalds/linux/blob/master/include/uapi/linux/can.h) 定义 16 字节 Classical `struct can_frame`：native-endian 32-bit `can_id`、`len`、三个单字节 pad/reserved/`len8_dlc`、8 字节数据；`data` 位于偏移 8。bridge 显式封装为 `=IBBBB8s` 并由测试检查全部 16 字节。标准/扩展和 RTR 标志分别按 Linux UAPI 置位。raw DLC 9～15 在实时 SocketCAN bridge 的普通 `len` 字段钳为 8，`len8_dlc` 保持零；FCAN 和 verbose 日志继续保留原始 DLC。离线 PCAPNG 的 LINKTYPE_CAN_SOCKETCAN 记录在 `len=8` 时把原始 DLC 9～15写入 `len8_dlc`，因此不会把 DLC 8 与 9～15 混淆。RTR 保留请求长度，数据清零。
 
 FPGA SOF 时间戳为 50 MHz 计数，1 tick = 20 ns。普通 SocketCAN 写入不能赋予该帧外部 RX 时间戳；`candump` 所见时间由 Linux/vcan 产生。bridge 可用 `--verbose` 打印原始 `fpga_ts`，不伪造内核时间。实际 vcan/candump 贯通测试需在可用 Linux 主机上执行；目前只完成模拟输出端测试。
 
-FPGA 复位会让 FCAN sequence 从 0 重启。bridge 将正常的 `0xffffffff → 0` 视为环绕。v1 对非环绕的序号归零作启发式新轮次判断；若零号包丢失，仍无法仅靠序号可靠辨别。v2 携带外部提供的 `session_id`，bridge 在其变化时开始新轮次，即使新轮次零号包丢失也可辨别。但纯 FPGA RTL **没有**持久化 boot epoch：若板级来源复用相同值，v2 同样不能保证重启识别。来源待板级集成决定，详见 [协议](can_udp_protocol.md) 和 [诊断](diagnostics.md)。
+FPGA 复位会让 FCAN sequence 从 0 重启。bridge 将正常的 `0xffffffff → 0` 视为环绕。v2 的 `session_id` 变化会关闭旧 session，后续迟到的已关闭 session 数据报直接丢弃，不允许它再次切换当前 epoch；如果 v2 复用了同一个 session ID，则与 v1 一样使用“非环绕序号归零”作为重启兜底。若这种同 session 重启的零号包也丢失，主机仍无法仅靠现有字段无歧义识别，因此板级 session ID 应尽量保证每次启动不同。纯 FPGA RTL **没有**持久化 boot epoch，来源仍待板级集成决定，详见 [协议](can_udp_protocol.md) 和 [诊断](diagnostics.md)。
 
 ## 尚未验证与板到手后的次序
 
