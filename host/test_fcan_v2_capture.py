@@ -87,15 +87,21 @@ class V2Test(unittest.TestCase):
         entries = blocks(output.getvalue())
         self.assertEqual([b[0] for b in entries], [0x0A0D0D0A, 1, 6, 6])
         self.assertEqual(struct.unpack_from("<H", entries[1][1])[0], 227)
-        self.assertEqual(entries[1][1][-8:], b"\x09\x00\x01\x00\x09\x00\x00\x00")
+        self.assertEqual(entries[1][1][-12:],
+                         b"\x09\x00\x01\x00\x09\x00\x00\x00"
+                         b"\x00\x00\x00\x00")
         frame_a = entries[2][1][20:36]
         frame_b = entries[3][1][20:36]
         self.assertEqual(struct.unpack_from(">I", frame_a)[0], 0x98DAF110)
         self.assertEqual(frame_a[4], 8)
+        self.assertEqual(frame_a[7], 9)
         self.assertEqual(frame_a[8:16], b"ABCDEFGH")
         self.assertEqual(struct.unpack_from(">I", frame_b)[0], 0x40000321)
         self.assertEqual(frame_b[4], 4)
+        self.assertEqual(frame_b[7], 0)
         self.assertEqual(frame_b[8:16], bytes(8))
+        self.assertEqual(entries[2][1][-4:], bytes(4))
+        self.assertEqual(entries[3][1][-4:], bytes(4))
         timestamp_a = struct.unpack_from("<IIIII", entries[2][1])[1:3]
         timestamp_b = struct.unpack_from("<IIIII", entries[3][1])[1:3]
         self.assertEqual((timestamp_b[0] << 32 | timestamp_b[1]) -
