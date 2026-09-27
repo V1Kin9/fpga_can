@@ -89,10 +89,12 @@ class Bridge:
         self.previous_seq: int | None = None
         self.previous_session: int | None = None
         self.previous_version: int | None = None
+        self.retired_sessions: set[int] = set()
         self.forwarded_frames = 0
         self.invalid_packets = 0
         self.missing_packets = 0
         self.old_packets = 0
+        self.stale_session_packets = 0
         self.reset_epochs = 0
 
     def process_datagram(self, payload: bytes) -> int:
@@ -110,10 +112,26 @@ class Bridge:
             return 0
 
         sequence = packet.sequence
-        if self.previous_version is not None and (
+
+        # A v2 session ID is an epoch identity. Once we have switched away
+        # from one session, a delayed datagram from that retired session must
+        # not be allowed to reopen the epoch and re-inject stale CAN frames.
+        if (packet.version == 2 and packet.session_id is not None and
+                packet.session_id in self.retired_sessions and
+                packet.session_id != self.previous_session):
+            self.old_packets += 1
+            self.stale_session_packets += 1
+            LOG.warning("stale FCAN session packet: session=%u seq=%u; dropping",
+                        packet.session_id, sequence)
+            return 0
+
+        changed = self.previous_version is not None and (
             packet.version != self.previous_version or
             (packet.version == 2 and packet.session_id != self.previous_session)
-        ):
+        )
+        if changed:
+            if self.previous_version == 2 and self.previous_session is not None:
+                self.retired_sessions.add(self.previous_session)
             self.reset_epochs += 1
             LOG.warning("FCAN session/version changed: v%s/%s -> v%s/%s",
                         self.previous_version, self.previous_session,
@@ -122,10 +140,11 @@ class Bridge:
         if self.previous_seq is not None:
             expected = (self.previous_seq + 1) & 0xFFFFFFFF
             gap = (sequence - expected) & 0xFFFFFFFF
-            if packet.version == 1 and sequence == 0 and expected != 0 and self.previous_seq != 0:
+            if sequence == 0 and expected != 0 and self.previous_seq != 0:
                 # The FPGA packetizer restarts at zero after reset. FCAN v1
-                # has no explicit epoch field, so a new zero is the restart
-                # marker; normal 0xffffffff -> 0 wrap is handled above.
+                # has no epoch field; v2 can also reuse the same externally
+                # supplied session_id. In both cases zero is the fallback
+                # restart marker. Normal 0xffffffff -> 0 wrap is handled above.
                 self.reset_epochs += 1
                 LOG.warning("FCAN sequence restarted at zero after %u; accepting new epoch", self.previous_seq)
             elif gap >= 0x80000000:
@@ -173,9 +192,10 @@ def listen(bind: str, port: int, interface: str, *, verbose: bool = False) -> No
                 bridge.process_datagram(payload)
         except KeyboardInterrupt:
             LOG.info(
-                "stopped: forwarded=%u invalid=%u missing=%u duplicate/reordered=%u resets=%u",
+                "stopped: forwarded=%u invalid=%u missing=%u duplicate/reordered=%u stale_session=%u resets=%u",
                 bridge.forwarded_frames, bridge.invalid_packets,
-                bridge.missing_packets, bridge.old_packets, bridge.reset_epochs,
+                bridge.missing_packets, bridge.old_packets,
+                bridge.stale_session_packets, bridge.reset_epochs,
             )
 
 
