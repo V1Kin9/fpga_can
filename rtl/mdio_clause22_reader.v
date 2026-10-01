@@ -22,21 +22,21 @@ module mdio_clause22_reader #(
 );
     reg [4:0] phy_latched;
     reg [4:0] reg_latched;
-    reg [5:0] bit_index;
+    reg [6:0] bit_index;
     reg [15:0] half_count;
 
     function automatic frame_bit;
-        input [5:0] index;
+        input [6:0] index;
         input [4:0] phy;
         input [4:0] regnum;
         begin
-            if (index < 6'd32) frame_bit = 1'b1;       // Preamble
-            else if (index == 6'd32) frame_bit = 1'b0; // ST = 01
-            else if (index == 6'd33) frame_bit = 1'b1;
-            else if (index == 6'd34) frame_bit = 1'b1; // OP = 10 (read)
-            else if (index == 6'd35) frame_bit = 1'b0;
-            else if (index < 6'd41) frame_bit = phy[40-index];
-            else if (index < 6'd46) frame_bit = regnum[45-index];
+            if (index < 7'd32) frame_bit = 1'b1;       // Preamble
+            else if (index == 7'd32) frame_bit = 1'b0; // ST = 01
+            else if (index == 7'd33) frame_bit = 1'b1;
+            else if (index == 7'd34) frame_bit = 1'b1; // OP = 10 (read)
+            else if (index == 7'd35) frame_bit = 1'b0;
+            else if (index < 7'd41) frame_bit = phy[40-index];
+            else if (index < 7'd46) frame_bit = regnum[45-index];
             else frame_bit = 1'b1;
         end
     endfunction
@@ -52,7 +52,7 @@ module mdio_clause22_reader #(
             read_data <= 16'h0000;
             phy_latched <= 5'd0;
             reg_latched <= 5'd0;
-            bit_index <= 6'd0;
+            bit_index <= 7'd0;
             half_count <= 16'd0;
         end else begin
             done <= 1'b0;
@@ -61,7 +61,7 @@ module mdio_clause22_reader #(
                 if (start) begin
                     phy_latched <= phy_addr;
                     reg_latched <= reg_addr;
-                    bit_index <= 6'd0;
+                    bit_index <= 7'd0;
                     half_count <= 16'd0;
                     read_data <= 16'h0000;
                     ta_ok <= 1'b0;
@@ -75,17 +75,17 @@ module mdio_clause22_reader #(
                     mdc <= 1'b1;
                 end else begin
                     mdc <= 1'b0;
-                    if (bit_index == 6'd47) ta_ok <= !mdio_in;
-                    if (bit_index >= 6'd48)
+                    if (bit_index == 7'd47) ta_ok <= !mdio_in;
+                    if (bit_index >= 7'd48 && bit_index <= 7'd63)
                         read_data <= {read_data[14:0], mdio_in};
-                    if (bit_index == 6'd63) begin
+                    if (bit_index == 7'd64) begin
                         busy <= 1'b0;
                         done <= 1'b1;
                         mdio_oe <= 1'b0;
                     end else begin
-                        bit_index <= bit_index + 6'd1;
-                        mdio_oe <= (bit_index + 6'd1 < 6'd46);
-                        mdio_out <= frame_bit(bit_index + 6'd1, phy_latched, reg_latched);
+                        bit_index <= bit_index + 7'd1;
+                        mdio_oe <= (bit_index + 7'd1 < 7'd46);
+                        mdio_out <= frame_bit(bit_index + 7'd1, phy_latched, reg_latched);
                     end
                 end
             end else begin

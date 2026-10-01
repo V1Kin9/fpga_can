@@ -44,6 +44,7 @@ module tb_eth1_phy_probe;
     reg [4:0] cmd_reg = 5'd0;
     reg [15:0] response = 16'hffff;
     integer transaction_count = 0;
+    integer idle_count = 0;
     integer bmsr_count = 0;
 
     always @(posedge mdio_oe) begin
@@ -86,6 +87,11 @@ module tb_eth1_phy_probe;
         end
         if (bit_index >= 46 && mdio_oe)
             $fatal(1, "MAC did not release MDIO for turnaround/data");
+        if (bit_index == 64) begin
+            if (mdio_oe || mdio_line !== 1'b1)
+                $fatal(1, "Missing high-Z idle bit between MDIO reads");
+            idle_count = idle_count + 1;
+        end
         // The Realtek PHY is permitted to make data valid *after* this
         // rising edge. This model deliberately changes it after the edge.
         if (respond_enabled && cmd_phy == response_addr && bit_index == 47) begin
@@ -101,9 +107,10 @@ module tb_eth1_phy_probe;
     end
 
     always @(negedge mdc) begin
-        if (bit_index < 63) begin
+        if (bit_index < 64) begin
             bit_index = bit_index + 1;
             if (bit_index == 46) slave_oe = 1'b0;
+            if (bit_index == 64) slave_oe = 1'b0;
         end else slave_oe = 1'b0;
     end
 
@@ -122,8 +129,8 @@ module tb_eth1_phy_probe;
             bmcr !== 16'h1140 || bmsr !== 16'h782d || physr !== 16'hac00 ||
             !link_up || !autoneg_complete || snapshot_count !== 8'd1)
             $fatal(1, "PHY scan/status mismatch mask=%h id=%h:%h bmcr=%h bmsr=%h", found_mask, phy_id1, phy_id2, bmcr, bmsr);
-        if (transaction_count != 37 || bmsr_count != 2)
-            $fatal(1, "Expected 32 address scans and five register reads");
+        if (transaction_count != 37 || idle_count != transaction_count || bmsr_count != 2)
+            $fatal(1, "Expected 32 address scans, five register reads, and one idle bit per read");
 
         link_mode = 1'b0;
         wait (snapshot_count == 8'd2);

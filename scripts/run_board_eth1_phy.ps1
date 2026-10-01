@@ -43,7 +43,7 @@ try {
     Copy-Item -LiteralPath @($bitstream,$probes,$provenancePath,$captureTcl) -Destination $work
     Push-Location $work
     try {
-        & (Join-Path $VivadoBin 'vivado.bat') -mode batch -source (Join-Path $work 'board_eth1_phy_capture.tcl') -tclargs $work -nolog -nojournal 2>&1 |
+        & (Join-Path $VivadoBin 'vivado.bat') -mode batch -nolog -nojournal -source (Join-Path $work 'board_eth1_phy_capture.tcl') -tclargs $work 2>&1 |
             Tee-Object -FilePath 'board_console.log'
         if ($LASTEXITCODE -ne 0 -or
             -not (Select-String -LiteralPath 'board_console.log' -Pattern 'ETH1_PHY_BOARD_CAPTURE_PASS' -Quiet)) {
@@ -66,7 +66,8 @@ try {
         if ($resolved.StartsWith($tempRoot + '\', [System.StringComparison]::OrdinalIgnoreCase) -and
             (Split-Path -Leaf $resolved) -match '^fpga_can_eth1_board_[0-9a-f]{32}$' -and
             -not ((Get-Item -LiteralPath $resolved).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            Remove-Item -LiteralPath $resolved -Recurse -Force
+            try { Remove-Item -LiteralPath $resolved -Recurse -Force }
+            catch { Write-Warning "Capture succeeded; temporary Vivado files remain locked at $resolved" }
         }
     } else { Write-Host "ETH1 board files: $work" }
 }
