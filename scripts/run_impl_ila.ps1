@@ -1,11 +1,12 @@
 param(
     [string]$VivadoBin = "C:\Xilinx\Vivado\2020.1\bin",
-    [switch]$KeepArtifacts
+    [switch]$KeepArtifacts,
+    [string]$WorkRoot = $env:TEMP
 )
 
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$work = Join-Path $env:TEMP ("fpga_can_impl_ila_" + [guid]::NewGuid().ToString("N"))
+$work = Join-Path $WorkRoot ("fpga_can_impl_ila_" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $work | Out-Null
 $exit = 1
 try {
@@ -14,13 +15,17 @@ try {
     Copy-Item -LiteralPath (Join-Path $root "scripts\impl_ila.tcl") -Destination $work
     Push-Location $work
     try {
-        & (Join-Path $VivadoBin "vivado.bat") -mode batch -source impl_ila.tcl -nolog -nojournal 2>&1 |
+        & (Join-Path $VivadoBin "vivado.bat") -mode batch -source (Join-Path $work "impl_ila.tcl") -nolog -nojournal 2>&1 |
             Tee-Object -FilePath "impl_console.log"
         if ($LASTEXITCODE -ne 0) { throw "Vivado implementation failed" }
         if (-not (Select-String -LiteralPath "impl_console.log" -Pattern 'CAN_ILA_IMPL_PASS' -Quiet)) {
             throw "Vivado did not reach the implementation completion marker"
         }
-        if (Select-String -LiteralPath "impl_console.log" -Pattern '(^ERROR:|^CRITICAL WARNING:)' -Quiet) {
+        # This host reports a Tcl Store cache permission warning at Vivado startup.
+        # It is unrelated to the design; keep rejecting every other critical warning.
+        $blocking = @(Select-String -LiteralPath "impl_console.log" -Pattern '^(ERROR:|CRITICAL WARNING:)' |
+            Where-Object { $_.Line -notmatch '^CRITICAL WARNING: \[Common 17-741\] No write access right to the local Tcl store' })
+        if ($blocking.Count -ne 0) {
             throw "Vivado reported an error or critical warning"
         }
         foreach ($name in @("can_ila.bit", "can_ila.ltx", "routed_timing.rpt", "routed_drc.rpt", "routed_bus_skew.rpt")) {
@@ -39,7 +44,7 @@ try {
     Write-Host "ILA implementation failed: $_"
 } finally {
     if ($exit -eq 0 -and -not $KeepArtifacts) {
-        $tempRoot = (Resolve-Path -LiteralPath $env:TEMP).Path.TrimEnd('\')
+        $tempRoot = (Resolve-Path -LiteralPath $WorkRoot).Path.TrimEnd('\')
         $resolved = (Resolve-Path -LiteralPath $work).Path
         if ($resolved.StartsWith($tempRoot + '\', [System.StringComparison]::OrdinalIgnoreCase) -and
             (Split-Path -Leaf $resolved) -match '^fpga_can_impl_ila_[0-9a-f]{32}$' -and

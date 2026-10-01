@@ -1,6 +1,8 @@
 # Non-project Vivado 2020.1 flow. Run from an ASCII working directory that
 # contains the RTL files and kintex7_base_can.xdc.
-read_verilog [glob *.v]
+set source_dir [file dirname [string map [list "\\" "/"] [info script]]]
+cd $source_dir
+read_verilog [glob [file join $source_dir *.v]]
 read_xdc kintex7_base_can.xdc
 synth_design -top can_sniffer_top -part xc7k325tffg676-2
 report_utilization -file synth_utilization.rpt

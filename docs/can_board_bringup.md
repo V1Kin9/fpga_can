@@ -1,4 +1,4 @@
-# CAN-only 首次上板记录（2026-10-01）
+# CAN-only 上板实测记录（2026-10-01）
 
 ## 测试条件
 
@@ -18,8 +18,30 @@ Vivado 报告配置完成，找到一个 ILA。原有 bitstream 对 `debug_frame
 
 临时诊断 ILA 还直接观察到 D13 从空闲高电平变低，且 parser 经过 CRC 到 ACK 字段。原有 bitstream 的结果证明一帧 500 kbit/s 标准数据帧已通过接收、校验和 FIFO 路径。仓库跟踪的 RTL 未因本次实测修改。
 
+## 当前 `main` 的定向实测
+
+在合并 PR #7 后的 `main` `53345a187af8cbeaa7b9a4b83550b228300b704a` 上重新执行 `scripts/run_impl_ila.ps1`，用新生成的匹配 `.bit`/`.ltx` 配置 `xc7k325t`。Vivado 2020.1 bitgen 成功；[布线后时序](evidence/can_ila_impl_20261001/routed_timing.rpt) WNS `+14.866 ns`、WHS `+0.049 ns`，[四组 bus skew 约束](evidence/can_ila_impl_20261001/routed_bus_skew.rpt)全部满足。[DRC](evidence/can_ila_impl_20261001/routed_drc.rpt) 无 Error，有一项 `RTSTAT-10` Warning，涉及调试核内部 25 条无可布线负载的 net。bitstream 和匹配探针文件保留在本地忽略的 `build/impl_ila/`。
+
+在上述隔离桌面总线，以 CANable COM7 串口固件 `2022 0726`、500 kbit/s、单次发送且关闭自动重发执行：
+
+```powershell
+.\scripts\run_board_can_matrix.ps1
+```
+
+| 用例 | 标识符 | IDE | RTR | DLC | 接收 DATA（低字节在前） | 结果 |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| `std_dlc0` | `0x321` | 0 | 0 | 0 | `0x0000000000000000` | PASS |
+| `std_dlc1` | `0x123` | 0 | 0 | 1 | `0x00000000000000A5` | PASS |
+| `std_dlc8` | `0x100` | 0 | 0 | 8 | `0x8877665544332211` | PASS |
+| `std_stuff` | `0x000` | 0 | 0 | 8 | `0xFFFF0000FFFF0000` | PASS |
+| `ext_data` | `0x18DAF110` | 1 | 0 | 2 | `0x000000000000BBAA` | PASS |
+| `std_rtr` | `0x456` | 0 | 1 | 4 | `0x0000000000000000` | PASS |
+| `ext_rtr` | `0x01ABCDE3` | 1 | 1 | 2 | `0x0000000000000000` | PASS |
+
+每份 1024 样本的原始 ILA CSV 都只有一个 `debug_frame_valid` 脉冲；该样本的 ID、IDE、RTR、DLC、DATA、CRC 均匹配预期，下一样本有且仅有一次 `fifo_valid`。整个捕获窗口均未见 `debug_error` 或 `fifo_overflow`。完整原始 CSV、[汇总](evidence/can_board_matrix_20261001/summary.csv)和[测试清单](evidence/can_board_matrix_20261001/manifest.json)已存档；清单记录 Git HEAD 及 bitstream/探针文件 SHA-256。ILA 在 50 MHz 下的 1024 样本只覆盖帧结束附近约 20.48 µs，不能据此声称捕获了整个 CAN 波形。
+
 ## 边界与后续
 
-当前只有一帧首测，尚未在实体总线上覆盖扩展帧、RTR、其他 DLC、连续帧、四种速率或长时间误码。FPGA 被动监听不发 ACK；parser 的 ACK slot 接受任一总线值，因此 `frame_valid` 不能单独证明发送端获得 ACK。收发器芯片表面丝印尚未读清，终端阻值及 3.3 V 电压也未用仪表复测。测试结论不适用于车辆总线。
+已覆盖上述七种单次帧，尚未在实体总线上覆盖原始 DLC 9～15、125/250/1000 kbit/s、连续帧或长时间误码。当前 CANable 串口固件的 [SLCAN 实现](https://github.com/normaldotcom/canable2-fw/blob/main/src/slcan.c)限制 DLC 不超过 8，无法用它直接发出原始 DLC 9～15。FPGA 被动监听不发 ACK；parser 的 ACK slot 接受任一总线值，因此 `frame_valid` 不能证明发送端获得 ACK。当前仅一块主动 CAN 控制器，持续无错误发送还需要第二个能够 ACK 的节点。收发器芯片表面丝印尚未读清，终端阻值及 3.3 V 电压也未用仪表复测。测试结论不适用于车辆总线。
 
-下一步先在隔离总线上补标准/扩展、RTR、DLC 与连续帧定向测试，再进行 GMII→RGMII/RTL8211E 板级引脚、时钟与时序约束工作。实体以太网链路及 FCAN UDP→Linux bridge 尚未验证。
+下一步在隔离桌面总线加第二个能够 ACK 的 CAN 控制器，进行连续帧、丢帧统计和多速率实测，并用可用的万用表确认终端电阻。随后再进行 GMII→RGMII/RTL8211E 板级引脚、时钟与时序约束工作。实体以太网链路及 FCAN UDP→Linux bridge 尚未验证。
