@@ -1,8 +1,8 @@
 `timescale 1ns/1ps
 
-// One Clause 22 read transaction. Drive MDIO while MDC is low. RTL8211E
-// allows PHY data to become valid up to 300 ns after MDC rises, so sample it
-// at the following falling edge (400 ns high at the default divider).
+// One Clause 22 read transaction. Change MDIO halfway through MDC low,
+// leaving setup/hold margin at both clock edges. RTL8211E permits PHY data
+// valid up to 300 ns after MDC rises; sample at the following falling edge.
 module mdio_clause22_reader #(
     parameter integer MDC_HALF_CYCLES = 20
 ) (
@@ -71,6 +71,11 @@ module mdio_clause22_reader #(
                     mdio_oe <= 1'b1;
                     busy <= 1'b1;
                 end
+            end else if (!mdc && half_count == (MDC_HALF_CYCLES/2)-1) begin
+                // Do not change data/output enable on the falling MDC edge.
+                mdio_oe <= (bit_index < 7'd46);
+                mdio_out <= frame_bit(bit_index, phy_latched, reg_latched);
+                half_count <= half_count + 16'd1;
             end else if (half_count == MDC_HALF_CYCLES-1) begin
                 half_count <= 16'd0;
                 if (!mdc) begin
@@ -86,8 +91,6 @@ module mdio_clause22_reader #(
                         mdio_oe <= 1'b0;
                     end else begin
                         bit_index <= bit_index + 7'd1;
-                        mdio_oe <= (bit_index + 7'd1 < 7'd46);
-                        mdio_out <= frame_bit(bit_index + 7'd1, phy_latched, reg_latched);
                     end
                 end
             end else begin

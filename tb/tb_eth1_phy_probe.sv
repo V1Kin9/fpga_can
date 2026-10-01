@@ -107,6 +107,15 @@ module tb_eth1_phy_probe;
     end
 
     always @(negedge mdc) begin
+        // The PHY can see the same falling edge. Keep output and direction
+        // unchanged around it; update only later in the low half-cycle.
+        reg held_out;
+        reg held_oe;
+        held_out = mdio_out;
+        held_oe = mdio_oe;
+        #1;
+        if (mdio_out !== held_out || mdio_oe !== held_oe)
+            $fatal(1, "MAC changed MDIO on MDC falling edge");
         if (bit_index < 64) begin
             bit_index = bit_index + 1;
             if (bit_index == 46) slave_oe = 1'b0;

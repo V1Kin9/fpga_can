@@ -23,10 +23,11 @@ program_hw_devices $device
 refresh_hw_device $device
 set ila [lindex [get_hw_ilas] 0]
 if {$ila eq ""} { error "ETH1 PHY ILA core not found" }
+puts "ETH1_PHY_ILA_PROBES [get_hw_probes -of_objects $ila]"
 set status_probe [get_hw_probes debug_snapshot_pulse -of_objects $ila]
-set start_probe [get_hw_probes debug_mdio_start -of_objects $ila]
-set addr_probe [get_hw_probes {debug_mdio_phy_addr[4:0]} -of_objects $ila]
-set reg_probe [get_hw_probes {debug_mdio_reg_addr[4:0]} -of_objects $ila]
+set start_probe [get_hw_probes -of_objects $ila -filter {NAME =~ *debug_mdio_start*}]
+set addr_probe [get_hw_probes -of_objects $ila -filter {NAME =~ *debug_mdio_phy_addr*}]
+set reg_probe [get_hw_probes -of_objects $ila -filter {NAME =~ *debug_mdio_reg_addr*}]
 if {$status_probe eq "" || $start_probe eq "" || $addr_probe eq "" || $reg_probe eq ""} {
     error "ETH1 PHY trigger probes not found"
 }
@@ -46,13 +47,14 @@ proc capture {ila work label} {
 }
 set_property TRIGGER_COMPARE_VALUE eq1'b1 $start_probe
 set_property TRIGGER_COMPARE_VALUE eq5'h02 $reg_probe
-set_property TRIGGER_COMPARE_VALUE eq5'h00 $addr_probe
-capture $ila $work mdio_1
 set_property TRIGGER_COMPARE_VALUE eq5'h01 $addr_probe
+capture $ila $work mdio_1
+set_property TRIGGER_COMPARE_VALUE eq5'h00 $addr_probe
+set_property TRIGGER_COMPARE_VALUE eq5'h01 $reg_probe
 capture $ila $work mdio_2
-reset_property TRIGGER_COMPARE_VALUE $start_probe
-reset_property TRIGGER_COMPARE_VALUE $reg_probe
-reset_property TRIGGER_COMPARE_VALUE $addr_probe
+set_property TRIGGER_COMPARE_VALUE eq1'bx $start_probe
+set_property TRIGGER_COMPARE_VALUE eq5'bxxxxx $reg_probe
+set_property TRIGGER_COMPARE_VALUE eq5'bxxxxx $addr_probe
 set_property TRIGGER_COMPARE_VALUE eq1'b1 $status_probe
 capture $ila $work status
 close_hw_target $target
