@@ -14,7 +14,7 @@ CAN RX → 帧队列 → FCAN 打包 → Ethernet II/IPv4/UDP 帧构建
 125 MHz GMII 域               ethernet_mac_tx
                               GMII TXD[7:0] / TX_EN / TX_ER
                                         ↓
-                              [板级 RGMII / RTL8211E：尚未实现]
+                              [板级 RGMII 数据：尚未实现；PHY 探测独立进行]
 ```
 
 ## 完整帧 CDC 缓冲
@@ -42,6 +42,6 @@ CRC 使用反射多项式 `0xEDB88320`，初始值 `0xFFFFFFFF`，最终取反�
 
 ## GMII 接口与后续板级工作
 
-顶层输入为 `gmii_clk_125m`，输出为 `gmii_txd[7:0]`、`gmii_tx_en` 和 `gmii_tx_er`。工程当前不生成 125 MHz 时钟；该时钟来源和 RGMII TXC 相位须结合实际板卡与 RTL8211E 确定。
+顶层输入为 `gmii_clk_125m`，输出为 `gmii_txd[7:0]`、`gmii_tx_en` 和 `gmii_tx_er`。此便携式顶层仍需外部 125 MHz 时钟。独立的 [ETH1 PHY 探测顶层](eth1_phy_bringup.md)已从板载 50 MHz 生成 125 MHz，不能直接视为 CAN→GMII 与 PHY 已集成。
 
-拿到实体板卡后，依次核对时钟/PHY 连接与延时方案，加入 GMII→RGMII DDR 层、必要的 PHY 复位/MDIO、实际引脚和源同步时序约束，完成布局布线、CDC/DRC/STA 和 PC 端抓包。当前仿真、综合及主机桥接并不等同于物理 Ethernet 链路验证。
+下一阶段在已核对的 ETH1 引脚与 PHY 延时配置基础上，加入 GMII→RGMII DDR 数据层和源同步时序约束，完成布局布线、CDC/DRC/STA 和 PC 端抓包。当前便携式顶层的仿真、综合及主机桥接不等同于物理 Ethernet 实包验证。
