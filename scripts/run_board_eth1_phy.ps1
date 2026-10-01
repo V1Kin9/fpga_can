@@ -17,8 +17,10 @@ if ($provenance.SchemaVersion -ne 1 -or $provenance.Top -ne 'eth1_phy_probe_top'
 }
 $gitSafeRoot = $root.Replace('\','/')
 $currentHead = (& git -c "safe.directory=$gitSafeRoot" -C $root rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0 -or $currentHead -ne $provenance.SourceGitHead) {
-    throw 'ETH1 bitstream Git HEAD does not match current checkout'
+if ($LASTEXITCODE -ne 0) { throw 'Cannot read current ETH1 Git HEAD' }
+& git -c "safe.directory=$gitSafeRoot" -C $root merge-base --is-ancestor $provenance.SourceGitHead $currentHead
+if ($LASTEXITCODE -ne 0) {
+    throw 'ETH1 bitstream source commit is not an ancestor of current checkout'
 }
 foreach ($property in $provenance.SourceFilesSha256.PSObject.Properties) {
     $path = Join-Path $root ($property.Name -replace '/', '\')
@@ -56,6 +58,7 @@ try {
         $output = Join-Path $root "build\board_test\eth1_phy_$stamp"
         New-Item -ItemType Directory -Force -Path $output | Out-Null
         Copy-Item -LiteralPath @('eth1_phy_status.csv','eth1_phy_mdio_1.csv','eth1_phy_mdio_2.csv','board_console.log','provenance.json') -Destination $output
+        & (Join-Path $PSScriptRoot 'check_eth1_phy_capture.ps1') -CaptureDir $output
         Write-Host "ETH1_PHY_BOARD_CAPTURE_PASS; outputs: $output"
         $success = $true
     } finally { Pop-Location }

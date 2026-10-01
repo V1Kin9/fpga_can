@@ -20,13 +20,19 @@
 .\scripts\run_board_eth1_phy.ps1
 ```
 
-实现脚本在临时 ASCII 路径运行 Vivado 2020.1，生成 `build/eth1_phy_impl/eth1_phy.bit`、匹配的 `.ltx`、布线报告和 `provenance.json`。上板脚本要求构建时相关源码已提交、当前 HEAD 与源码哈希仍匹配，随后经 JTAG 下载并采集状态及两次原始 MDIO ILA CSV 到 `build/board_test/eth1_phy_*/`。运行后可用 Vivado Hardware Manager 打开同一 `.bit/.ltx` 查看波形。重新下载此 bitstream 会结束原 CAN-only ILA 的运行。
+实现脚本在临时 ASCII 路径运行 Vivado 2020.1，生成 `build/eth1_phy_impl/eth1_phy.bit`、匹配的 `.ltx`、布线报告和 `provenance.json`。上板脚本要求构建时相关源码已提交，构建提交仍是当前 HEAD 的祖先，且每个参与实现的源码哈希与 bitstream、探针哈希均匹配。随后经 JTAG 下载并采集状态及两次原始 MDIO ILA CSV 到 `build/board_test/eth1_phy_*/`，自动核对 PHY ID、地址、125 MHz 活动及原始 MDIO 位流；错误读数会使脚本失败。运行后可用 Vivado Hardware Manager 打开同一 `.bit/.ltx` 查看波形。重新下载此 bitstream 会结束原 CAN-only ILA 的运行。
 
 ## 判读
 
 无网线也应读到 PHY ID。预期 `found_mask=0x00000002`、`found_addr=1`、`PHYID1=0x001c`；手册给出的 RTL8211E model/revision 对应 `PHYID2=0xc915`，实物修订位可不同。`debug_clk125_toggle` 在 50 MHz ILA 窗口内应反复翻转。
 
 把 J1 接到电脑千兆网口或千兆交换机后，再看链路状态：BMSR bit 2 为 link、bit 5 为自动协商完成；PHYSR（寄存器 17）bit 10 为实时 link、bit 11 为速率/双工已解析、bit 13 为全双工、bits 15:14 中 `10` 为 1000 Mb/s、`01` 为 100 Mb/s、`00` 为 10 Mb/s。两端读数应与电脑网卡报告的速率相符。仅有网口 LED 亮起不足以证明 UDP 发送。
+
+## 2026-10-02 实板结果
+
+在 `50a6768` 源码构建的 bitstream 上，Windows Vivado 2020.1 对 JTAG 设备 `xc7k325t` 下载成功。XSim `tb_eth1_phy_probe` 通过；布线后 WNS 为 +2.647 ns、WHS 为 +0.050 ns，四项总线偏斜约束均满足，DRC 为 0 错误、1 项 ILA/debug hub 内部 `RTSTAT-10` 警告。
+
+ILA 快照显示 `found_mask=0x00000002`、地址 1、`PHYID1=0x001c`、`PHYID2=0xc915`、`BMCR=0x1140`、`BMSR=0x7949`、`PHYSR=0x4040`，MMCM 已锁定且 PHY 复位已释放。原始 MDIO 波形独立解码的 PHYID1 也为 `0x001c`。本次快照的 `link_up=0`、自动协商未完成；链路协商仍需在 J1 连上千兆网口或交换机后复测。本地原始捕获位于 `build/board_test/eth1_phy_20261002_011213/`，构建溯源文件记录 bitstream 与探针哈希。
 
 ## 验证边界
 
