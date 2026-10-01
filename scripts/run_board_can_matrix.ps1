@@ -17,21 +17,54 @@ $catalog = @{
     std_rtr = @{ Command='r4564'; Id='00000456'; Ide='0'; Rtr='1'; Dlc='4'; Data='0000000000000000' }
     ext_rtr = @{ Command='R01ABCDE32'; Id='01ABCDE3'; Ide='1'; Rtr='1'; Dlc='2'; Data='0000000000000000' }
 }
+if ($Cases.Count -eq 0) { throw 'At least one case is required' }
+$seenCases = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 foreach ($name in $Cases) {
     if (-not $catalog.ContainsKey($name)) { throw "Unknown case: $name" }
+    if (-not $seenCases.Add($name)) { throw "Duplicate case: $name" }
 }
-if ($Cases.Count -eq 0) { throw 'At least one case is required' }
 if (-not ([System.IO.Ports.SerialPort]::GetPortNames() -contains $PortName)) {
     throw "Serial port not present: $PortName"
 }
 $vivado = Join-Path $VivadoBin 'vivado.bat'
 if (-not (Test-Path -LiteralPath $vivado)) { throw "Vivado not found: $vivado" }
+$implDir = Join-Path $root 'build/impl_ila'
+$provenancePath = Join-Path $implDir 'provenance.json'
+if (-not (Test-Path -LiteralPath $provenancePath)) {
+    throw "Missing implementation provenance; rebuild the ILA bitstream: $provenancePath"
+}
+$provenance = Get-Content -LiteralPath $provenancePath -Raw | ConvertFrom-Json
+if ($provenance.SchemaVersion -ne 1 -or -not $provenance.SourceGitHead -or
+    -not $provenance.SourceFilesSha256 -or -not $provenance.BitstreamSha256 -or
+    -not $provenance.ProbesSha256) { throw "Incomplete implementation provenance: $provenancePath" }
+$sourcePaths = @($provenance.SourceFilesSha256.PSObject.Properties.Name)
+$currentSources = @(Get-ChildItem -LiteralPath (Join-Path $root 'rtl') -Filter '*.v' -File |
+    ForEach-Object { "rtl/$($_.Name)" }) + @('constraints/kintex7_base_can.xdc', 'scripts/impl_ila.tcl', 'scripts/run_impl_ila.ps1')
+if ($sourcePaths.Count -ne $currentSources.Count) { throw 'Bitstream source set differs from current checkout' }
+foreach ($path in $currentSources) {
+    if ($sourcePaths -cnotcontains $path) { throw "Bitstream source missing from provenance: $path" }
+    $actual = (Get-FileHash -LiteralPath (Join-Path $root ($path -replace '/', '\')) -Algorithm SHA256).Hash
+    if ($actual -ne $provenance.SourceFilesSha256.PSObject.Properties[$path].Value) {
+        throw "Bitstream source differs from current checkout: $path"
+    }
+}
+$bitstream = Join-Path $implDir 'can_ila.bit'
+$probes = Join-Path $implDir 'can_ila.ltx'
+if ((Get-FileHash -LiteralPath $bitstream -Algorithm SHA256).Hash -ne $provenance.BitstreamSha256 -or
+    (Get-FileHash -LiteralPath $probes -Algorithm SHA256).Hash -ne $provenance.ProbesSha256) {
+    throw 'Bitstream or probes do not match implementation provenance'
+}
 
-$stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$stamp = (Get-Date -Format 'yyyyMMdd_HHmmss_fff') + '_' + [guid]::NewGuid().ToString('N').Substring(0, 8)
 $relativeOut = "build/board_test/matrix_$stamp"
 $out = Join-Path $root ($relativeOut -replace '/', '\')
 New-Item -ItemType Directory -Path $out -Force | Out-Null
 [System.IO.File]::WriteAllLines((Join-Path $out 'cases.txt'), [string[]]$Cases, [System.Text.Encoding]::ASCII)
+Copy-Item -LiteralPath $bitstream,$probes,$provenancePath -Destination $out
+if ((Get-FileHash -LiteralPath (Join-Path $out 'can_ila.bit') -Algorithm SHA256).Hash -ne $provenance.BitstreamSha256 -or
+    (Get-FileHash -LiteralPath (Join-Path $out 'can_ila.ltx') -Algorithm SHA256).Hash -ne $provenance.ProbesSha256) {
+    throw 'Copied bitstream or probes differ from implementation provenance'
+}
 $stdout = Join-Path $out 'vivado_stdout.log'
 $stderr = Join-Path $out 'vivado_stderr.log'
 $process = $null
@@ -47,6 +80,28 @@ function Wait-Flag([string]$path, [int]$seconds, [System.Diagnostics.Process]$pr
     throw "Timed out waiting for $(Split-Path -Leaf $path); see $stdout"
 }
 
+function Wait-FirmwareBarrier([System.IO.Ports.SerialPort]$port, [string]$command) {
+    # Firmware 2022 0726 emits no per-command ACK. A following V response
+    # proves the parser advanced past this command before the next one.
+    $port.DiscardInBuffer()
+    if ($command) { $port.Write($command + "`rV`r") }
+    else { $port.Write("V`r") }
+    $response = ''
+    $until = [DateTime]::UtcNow.AddSeconds(2)
+    while ([DateTime]::UtcNow -lt $until) {
+        $response += $port.ReadExisting()
+        if ($response.Contains([char]7)) { throw "CANable rejected $command (BEL)" }
+        if ($response.EndsWith("2022 0726`r")) {
+            if ($response -notmatch '^(?:\r|\n)*2022 0726\r$') {
+                throw "Unexpected CANable reply after ${command}: $response"
+            }
+            return $response
+        }
+        Start-Sleep -Milliseconds 10
+    }
+    throw "CANable did not reach firmware barrier after ${command}: $response"
+}
+
 function Send-OneShot([string]$command) {
     $port = [System.IO.Ports.SerialPort]::new($PortName, 115200,
         [System.IO.Ports.Parity]::None, 8, [System.IO.Ports.StopBits]::One)
@@ -55,20 +110,11 @@ function Send-OneShot([string]$command) {
         $port.WriteTimeout = 500
         $port.Open()
         Start-Sleep -Milliseconds 100
-        $port.DiscardInBuffer()
-        $port.Write("V`r")
-        Start-Sleep -Milliseconds 150
-        $version = $port.ReadExisting()
-        if ($version -notmatch '2022 0726') { throw "Unexpected CANable firmware: $version" }
+        $null = Wait-FirmwareBarrier $port ''
         foreach ($setup in @('C', 'S6', 'A0', 'M0', 'O')) {
-            $port.Write($setup + "`r")
-            Start-Sleep -Milliseconds 40
+            $null = Wait-FirmwareBarrier $port $setup
         }
-        $port.DiscardInBuffer()
-        $port.Write($command + "`r")
-        Start-Sleep -Milliseconds 300
-        $reply = $port.ReadExisting()
-        if ($reply.Contains([char]7)) { throw "CANable rejected $command (BEL)" }
+        $reply = Wait-FirmwareBarrier $port $command
         return ($reply -replace "`r", '<CR>' -replace "`n", '<LF>')
     } finally {
         if ($port.IsOpen) {
@@ -142,9 +188,12 @@ try {
     }
     $summary | Export-Csv -LiteralPath (Join-Path $out 'summary.csv') -NoTypeInformation
     [pscustomobject]@{
-        GitHead = (& git -c "safe.directory=$($root.Replace('\','/'))" rev-parse HEAD).Trim()
-        BitstreamSha256 = (Get-FileHash -LiteralPath (Join-Path $root 'build/impl_ila/can_ila.bit') -Algorithm SHA256).Hash
-        ProbesSha256 = (Get-FileHash -LiteralPath (Join-Path $root 'build/impl_ila/can_ila.ltx') -Algorithm SHA256).Hash
+        BuildSourceGitHead = $provenance.SourceGitHead
+        BuildSourceTreeDirty = $provenance.SourceTreeDirty
+        CaptureGitHead = (& git -c "safe.directory=$($root.Replace('\','/'))" rev-parse HEAD).Trim()
+        BitstreamSha256 = $provenance.BitstreamSha256
+        ProbesSha256 = $provenance.ProbesSha256
+        BuildProvenanceSha256 = (Get-FileHash -LiteralPath (Join-Path $out 'provenance.json') -Algorithm SHA256).Hash
         Port = $PortName
         CanBitrate = 500000
         RunUtc = [DateTime]::UtcNow.ToString('o')

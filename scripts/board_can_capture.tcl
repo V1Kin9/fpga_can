@@ -8,8 +8,8 @@ set fh [open $list_file r]
 set cases [split [string trim [read $fh]] "\n"]
 close $fh
 
-set bitfile [file normalize build/impl_ila/can_ila.bit]
-set ltxfile [file normalize build/impl_ila/can_ila.ltx]
+set bitfile [file join $out_dir can_ila.bit]
+set ltxfile [file join $out_dir can_ila.ltx]
 if {![file isfile $bitfile] || ![file isfile $ltxfile]} {
     error "Matched CAN-only bitstream and probes are required"
 }
