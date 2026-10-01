@@ -100,7 +100,8 @@ module eth1_phy_probe_top (
     (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire debug_snapshot_pulse;
 
     assign phy_rstn = debug_phy_rstn;
-    eth1_phy_probe_core u_probe (
+    // Leave time for Hardware Manager to arm the ILA before the one-time scan.
+    eth1_phy_probe_core #(.POST_RESET_CYCLES(750_000_000)) u_probe (
         .clk_50m(clk_50m_i), .rst_n(core_rst_n),
         .mdio_in(mdio), .mdc(mdc), .mdio_out(mdio_out), .mdio_oe(mdio_oe),
         .phy_rstn(debug_phy_rstn),

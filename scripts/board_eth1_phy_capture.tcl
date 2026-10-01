@@ -25,14 +25,17 @@ set ila [lindex [get_hw_ilas] 0]
 if {$ila eq ""} { error "ETH1 PHY ILA core not found" }
 set status_probe [get_hw_probes debug_snapshot_pulse -of_objects $ila]
 set start_probe [get_hw_probes debug_mdio_start -of_objects $ila]
-if {$status_probe eq "" || $start_probe eq ""} { error "ETH1 PHY trigger probes not found" }
+set addr_probe [get_hw_probes {debug_mdio_phy_addr[4:0]} -of_objects $ila]
+set reg_probe [get_hw_probes {debug_mdio_reg_addr[4:0]} -of_objects $ila]
+if {$status_probe eq "" || $start_probe eq "" || $addr_probe eq "" || $reg_probe eq ""} {
+    error "ETH1 PHY trigger probes not found"
+}
 set_property CONTROL.TRIGGER_CONDITION AND $ila
 set_property CONTROL.TRIGGER_POSITION 0 $ila
-set_property TRIGGER_COMPARE_VALUE eq1'b1 $status_probe
 
 proc capture {ila work label} {
     run_hw_ila $ila
-    if {[catch {wait_on_hw_ila -timeout 5 $ila} reason]} {
+    if {[catch {wait_on_hw_ila -timeout 25 $ila} reason]} {
         error "ETH1 PHY ILA capture $label failed: $reason"
     }
     set data [upload_hw_ila_data $ila]
@@ -41,11 +44,17 @@ proc capture {ila work label} {
     puts "ETH1_PHY_CAPTURED $label $csv"
     flush stdout
 }
-capture $ila $work status
-set_property TRIGGER_COMPARE_VALUE eq1'b0 $status_probe
 set_property TRIGGER_COMPARE_VALUE eq1'b1 $start_probe
+set_property TRIGGER_COMPARE_VALUE eq5'h02 $reg_probe
+set_property TRIGGER_COMPARE_VALUE eq5'h00 $addr_probe
 capture $ila $work mdio_1
+set_property TRIGGER_COMPARE_VALUE eq5'h01 $addr_probe
 capture $ila $work mdio_2
+reset_property TRIGGER_COMPARE_VALUE $start_probe
+reset_property TRIGGER_COMPARE_VALUE $reg_probe
+reset_property TRIGGER_COMPARE_VALUE $addr_probe
+set_property TRIGGER_COMPARE_VALUE eq1'b1 $status_probe
+capture $ila $work status
 close_hw_target $target
 disconnect_hw_server
 close_hw_manager
