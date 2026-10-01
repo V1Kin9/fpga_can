@@ -3,10 +3,15 @@ module can_gmii_pipeline_top #(
     parameter integer QUEUE_DEPTH = 64,
     parameter integer MAX_FRAMES_PER_PACKET = 16,
     parameter integer FLUSH_CYCLES = 50000,
-    // Ethernet/IP/UDP headers (42) + FCAN header (16) + 24 per CAN frame.
+    parameter integer CAN_BITRATE = 500000,
+    parameter integer FCAN_PROTOCOL_VERSION = 2,
+    parameter integer STATUS_INTERVAL_CYCLES = 50000000,
+    // Ethernet/IP/UDP (42) plus FCAN v1/v2 header and records.
     parameter integer MAX_ETH_FRAME_BYTES =
-        (512 > 58 + 24*MAX_FRAMES_PER_PACKET) ?
-        512 : 58 + 24*MAX_FRAMES_PER_PACKET,
+        (512 > 42 + ((FCAN_PROTOCOL_VERSION == 2) ? 20 : 16) +
+         ((FCAN_PROTOCOL_VERSION == 2) ? 32 : 24)*MAX_FRAMES_PER_PACKET) ?
+        512 : 42 + ((FCAN_PROTOCOL_VERSION == 2) ? 20 : 16) +
+              ((FCAN_PROTOCOL_VERSION == 2) ? 32 : 24)*MAX_FRAMES_PER_PACKET,
     parameter [47:0] SRC_MAC = 48'h020000000001,
     parameter [47:0] DST_MAC = 48'h020000000002,
     parameter [31:0] SRC_IP  = 32'hC0A83202,
@@ -18,6 +23,7 @@ module can_gmii_pipeline_top #(
     input  wire gmii_clk_125m,
     input  wire rst_n,
     input  wire can_rx,
+    input  wire [31:0] session_id,
     output wire can_tx,
 
     output wire gmii_tx_en,
@@ -51,11 +57,22 @@ module can_gmii_pipeline_top #(
     wire app_tx_ready;
     wire [7:0] app_tx_data;
     wire app_tx_last;
+    wire [15:0] mac_underrun_count_app;
+
+    gray_event_counter_cdc u_mac_error_cdc (
+        .source_clk(gmii_clk_125m), .source_rst_n(net_rst_n),
+        .source_event(mac_underrun_error),
+        .dest_clk(clk_50m), .dest_rst_n(app_rst_n),
+        .dest_count(mac_underrun_count_app)
+    );
 
     can_udp_ipv4_eth_pipeline_top #(
         .QUEUE_DEPTH(QUEUE_DEPTH),
         .MAX_FRAMES_PER_PACKET(MAX_FRAMES_PER_PACKET),
         .FLUSH_CYCLES(FLUSH_CYCLES),
+        .CAN_BITRATE(CAN_BITRATE),
+        .FCAN_PROTOCOL_VERSION(FCAN_PROTOCOL_VERSION),
+        .STATUS_INTERVAL_CYCLES(STATUS_INTERVAL_CYCLES),
         .SRC_MAC(SRC_MAC),
         .DST_MAC(DST_MAC),
         .SRC_IP(SRC_IP),
@@ -66,6 +83,9 @@ module can_gmii_pipeline_top #(
         .clk_50m(clk_50m),
         .rst_n(app_rst_n),
         .can_rx(can_rx),
+        .session_id(session_id),
+        .cdc_protocol_error(cdc_protocol_error),
+        .mac_underrun_count(mac_underrun_count_app),
         .can_tx(can_tx),
         .eth_frame_valid(app_frame_valid),
         .eth_frame_ready(app_frame_ready),

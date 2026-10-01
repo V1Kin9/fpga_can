@@ -3,6 +3,9 @@ module can_udp_ipv4_eth_pipeline_top #(
     parameter integer QUEUE_DEPTH = 64,
     parameter integer MAX_FRAMES_PER_PACKET = 16,
     parameter integer FLUSH_CYCLES = 50000,
+    parameter integer CAN_BITRATE = 500000,
+    parameter integer FCAN_PROTOCOL_VERSION = 2,
+    parameter integer STATUS_INTERVAL_CYCLES = 50000000,
     parameter [47:0] SRC_MAC = 48'h020000000001,
     parameter [47:0] DST_MAC = 48'h020000000002,
     parameter [31:0] SRC_IP  = 32'hC0A83202,
@@ -13,6 +16,9 @@ module can_udp_ipv4_eth_pipeline_top #(
     input  wire clk_50m,
     input  wire rst_n,
     input  wire can_rx,
+    input  wire [31:0] session_id,
+    input  wire cdc_protocol_error,
+    input  wire [15:0] mac_underrun_count,
     output wire can_tx,
 
     output wire eth_frame_valid,
@@ -39,11 +45,17 @@ module can_udp_ipv4_eth_pipeline_top #(
     can_udp_pipeline_top #(
         .QUEUE_DEPTH(QUEUE_DEPTH),
         .MAX_FRAMES_PER_PACKET(MAX_FRAMES_PER_PACKET),
-        .FLUSH_CYCLES(FLUSH_CYCLES)
+        .FLUSH_CYCLES(FLUSH_CYCLES),
+        .CAN_BITRATE(CAN_BITRATE),
+        .FCAN_PROTOCOL_VERSION(FCAN_PROTOCOL_VERSION),
+        .STATUS_INTERVAL_CYCLES(STATUS_INTERVAL_CYCLES)
     ) u_can_udp_pipeline (
         .clk_50m(clk_50m),
         .rst_n(rst_n),
         .can_rx(can_rx),
+        .session_id(session_id),
+        .cdc_protocol_error(cdc_protocol_error),
+        .mac_underrun_count(mac_underrun_count),
         .can_tx(can_tx),
         .packet_valid(payload_packet_valid),
         .packet_ready(payload_packet_ready),

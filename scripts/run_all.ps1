@@ -19,7 +19,19 @@ $tops = @(
     "tb_ethernet_mac_tx",
     "tb_sniffer_top",
     "tb_can_rx_top",
-    "tb_can_gmii_pipeline_top"
+    "tb_can_gmii_pipeline_top",
+    "tb_fcan_v2",
+    "tb_can_udp_pipeline_v2",
+    "tb_can_diagnostics",
+    "tb_gray_event_counter_cdc",
+    "tb_fcan_random_stress",
+    "tb_can_reset_midframe",
+    "tb_can_random_waveforms",
+    "tb_mac_idle_reset",
+    "tb_can_bitrate_125000",
+    "tb_can_bitrate_250000",
+    "tb_can_bitrate_500000",
+    "tb_can_bitrate_1000000"
 )
 foreach ($top in $tops) {
     Write-Host "=== $top ==="

@@ -1,5 +1,7 @@
 `timescale 1ns/1ps
-module can_frame_encoder(input wire clk, output reg bus = 1'b1);
+module can_frame_encoder #(
+    parameter integer CLOCKS_PER_BIT = 100
+) (input wire clk, output reg bus = 1'b1);
     reg raw_bits [0:255];
     reg wire_bits [0:319];
     integer raw_count, wire_count, first_stuff;
@@ -101,9 +103,9 @@ module can_frame_encoder(input wire clk, output reg bus = 1'b1);
             for(i=0;i<wire_count;i=i+1) begin
                 @(negedge clk);
                 bus=wire_bits[i];
-                clocks=100;
-                if(timing_mode==-1 && (i%2)==0) clocks=99;
-                if(timing_mode==1 && (i%2)==0) clocks=101;
+                clocks=CLOCKS_PER_BIT;
+                if(timing_mode==-1 && (i%2)==0) clocks=CLOCKS_PER_BIT-1;
+                if(timing_mode==1 && (i%2)==0) clocks=CLOCKS_PER_BIT+1;
                 repeat(clocks-1) @(negedge clk);
             end
             @(negedge clk);

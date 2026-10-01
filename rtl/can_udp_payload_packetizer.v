@@ -1,7 +1,8 @@
 `timescale 1ns/1ps
 module can_udp_payload_packetizer #(
     parameter integer MAX_FRAMES = 16,
-    parameter integer FLUSH_CYCLES = 50000
+    parameter integer FLUSH_CYCLES = 50000,
+    parameter integer FCAN_PROTOCOL_VERSION = 1
 ) (
     input  wire clk,
     input  wire rst_n,
@@ -15,6 +16,19 @@ module can_udp_payload_packetizer #(
     input  wire [63:0] frame_data,
     input  wire [63:0] frame_timestamp,
     input  wire frame_crc_ok,
+
+    input  wire [31:0] session_id,
+    input  wire error_valid,
+    output wire error_ready,
+    input  wire [7:0] error_code,
+    input  wire [63:0] error_timestamp,
+    input  wire status_valid,
+    output wire status_ready,
+    input  wire [7:0] status_flags,
+    input  wire [7:0] status_queue_level,
+    input  wire [7:0] status_queue_high_watermark,
+    input  wire [63:0] status_uptime_ticks,
+    input  wire [127:0] status_counters,
 
     output wire packet_valid,
     input  wire packet_ready,
@@ -38,8 +52,8 @@ module can_udp_payload_packetizer #(
         end
     endfunction
 
-    localparam integer HEADER_BYTES = 16;
-    localparam integer RECORD_BYTES = 24;
+    localparam integer HEADER_BYTES = (FCAN_PROTOCOL_VERSION == 2) ? 20 : 16;
+    localparam integer RECORD_BYTES = (FCAN_PROTOCOL_VERSION == 2) ? 32 : 24;
     localparam integer FRAME_WIDTH = 164;
     localparam integer FRAME_COUNT_WIDTH = clog2(MAX_FRAMES + 1);
     localparam integer FRAME_INDEX_WIDTH = clog2(MAX_FRAMES);
@@ -52,12 +66,21 @@ module can_udp_payload_packetizer #(
 
     reg [2:0] state;
     reg [FRAME_WIDTH-1:0] frame_mem [0:MAX_FRAMES-1];
+    reg [1:0] type_mem [0:MAX_FRAMES-1];
+    reg [7:0] error_code_mem [0:MAX_FRAMES-1];
+    reg [63:0] error_timestamp_mem [0:MAX_FRAMES-1];
+    reg [7:0] status_flags_mem [0:MAX_FRAMES-1];
+    reg [7:0] status_level_mem [0:MAX_FRAMES-1];
+    reg [7:0] status_watermark_mem [0:MAX_FRAMES-1];
+    reg [63:0] status_uptime_mem [0:MAX_FRAMES-1];
+    reg [127:0] status_counters_mem [0:MAX_FRAMES-1];
     reg [FRAME_COUNT_WIDTH-1:0] frame_count;
     reg [FRAME_INDEX_WIDTH-1:0] record_index;
     reg [4:0] record_byte_index;
     reg [4:0] header_index;
     reg [FLUSH_WIDTH-1:0] flush_count;
     reg [31:0] sequence_counter;
+    reg [31:0] packet_session_id;
 
     wire [FRAME_WIDTH-1:0] frame_word =
         {frame_timestamp, frame_data, frame_id, frame_dlc,
@@ -72,7 +95,11 @@ module can_udp_payload_packetizer #(
     wire current_rtr              = current_frame[1];
     wire current_crc_ok           = current_frame[0];
 
-    assign frame_ready = (state == ST_COLLECT) && (frame_count < MAX_FRAMES);
+    wire collect_ready = (state == ST_COLLECT) && (frame_count < MAX_FRAMES);
+    assign error_ready = (FCAN_PROTOCOL_VERSION == 2) && collect_ready;
+    assign status_ready = (FCAN_PROTOCOL_VERSION == 2) && collect_ready && !error_valid;
+    assign frame_ready = collect_ready &&
+                         ((FCAN_PROTOCOL_VERSION != 2) || (!error_valid && !status_valid));
     assign packet_valid = (state == ST_REQUEST);
     assign packet_length = HEADER_BYTES + frame_count * RECORD_BYTES;
     assign packet_sequence = sequence_counter;
@@ -89,7 +116,7 @@ module can_udp_payload_packetizer #(
                 1:  tx_data = 8'h43; // C
                 2:  tx_data = 8'h41; // A
                 3:  tx_data = 8'h4e; // N
-                4:  tx_data = 8'h01; // protocol version
+                4:  tx_data = FCAN_PROTOCOL_VERSION;
                 5:  tx_data = HEADER_BYTES;
                 6:  tx_data = RECORD_BYTES;
                 7:  tx_data = frame_count;
@@ -97,10 +124,87 @@ module can_udp_payload_packetizer #(
                 9:  tx_data = sequence_counter[23:16];
                 10: tx_data = sequence_counter[15:8];
                 11: tx_data = sequence_counter[7:0];
+                12: tx_data = (FCAN_PROTOCOL_VERSION == 2) ? packet_session_id[31:24] : 8'h00;
+                13: tx_data = (FCAN_PROTOCOL_VERSION == 2) ? packet_session_id[23:16] : 8'h00;
+                14: tx_data = (FCAN_PROTOCOL_VERSION == 2) ? packet_session_id[15:8] : 8'h00;
+                15: tx_data = (FCAN_PROTOCOL_VERSION == 2) ? packet_session_id[7:0] : 8'h00;
                 default: tx_data = 8'h00;
             endcase
         end else if (state == ST_RECORD) begin
-            case (record_byte_index)
+            if (FCAN_PROTOCOL_VERSION == 2 && type_mem[record_index] == 2'd1) begin
+                case (record_byte_index)
+                    0: tx_data = 8'h01;
+                    1: tx_data = error_code_mem[record_index];
+                    8: tx_data = error_timestamp_mem[record_index][63:56];
+                    9: tx_data = error_timestamp_mem[record_index][55:48];
+                    10: tx_data = error_timestamp_mem[record_index][47:40];
+                    11: tx_data = error_timestamp_mem[record_index][39:32];
+                    12: tx_data = error_timestamp_mem[record_index][31:24];
+                    13: tx_data = error_timestamp_mem[record_index][23:16];
+                    14: tx_data = error_timestamp_mem[record_index][15:8];
+                    15: tx_data = error_timestamp_mem[record_index][7:0];
+                    default: tx_data = 8'h00;
+                endcase
+            end else if (FCAN_PROTOCOL_VERSION == 2 && type_mem[record_index] == 2'd2) begin
+                case (record_byte_index)
+                    0: tx_data = 8'h02;
+                    1: tx_data = status_flags_mem[record_index];
+                    2: tx_data = status_level_mem[record_index];
+                    3: tx_data = status_watermark_mem[record_index];
+                    8: tx_data = status_uptime_mem[record_index][63:56];
+                    9: tx_data = status_uptime_mem[record_index][55:48];
+                    10: tx_data = status_uptime_mem[record_index][47:40];
+                    11: tx_data = status_uptime_mem[record_index][39:32];
+                    12: tx_data = status_uptime_mem[record_index][31:24];
+                    13: tx_data = status_uptime_mem[record_index][23:16];
+                    14: tx_data = status_uptime_mem[record_index][15:8];
+                    15: tx_data = status_uptime_mem[record_index][7:0];
+                    16: tx_data = status_counters_mem[record_index][127:120];
+                    17: tx_data = status_counters_mem[record_index][119:112];
+                    18: tx_data = status_counters_mem[record_index][111:104];
+                    19: tx_data = status_counters_mem[record_index][103:96];
+                    20: tx_data = status_counters_mem[record_index][95:88];
+                    21: tx_data = status_counters_mem[record_index][87:80];
+                    22: tx_data = status_counters_mem[record_index][79:72];
+                    23: tx_data = status_counters_mem[record_index][71:64];
+                    24: tx_data = status_counters_mem[record_index][63:56];
+                    25: tx_data = status_counters_mem[record_index][55:48];
+                    26: tx_data = status_counters_mem[record_index][47:40];
+                    27: tx_data = status_counters_mem[record_index][39:32];
+                    28: tx_data = status_counters_mem[record_index][31:24];
+                    29: tx_data = status_counters_mem[record_index][23:16];
+                    30: tx_data = status_counters_mem[record_index][15:8];
+                    31: tx_data = status_counters_mem[record_index][7:0];
+                    default: tx_data = 8'h00;
+                endcase
+            end else if (FCAN_PROTOCOL_VERSION == 2) begin
+                case (record_byte_index)
+                    0: tx_data = 8'h00;
+                    1: tx_data = {5'b0, current_crc_ok, current_rtr, current_ide};
+                    2: tx_data = {4'b0, current_dlc};
+                    4: tx_data = {3'b0, current_id[28:24]};
+                    5: tx_data = current_id[23:16];
+                    6: tx_data = current_id[15:8];
+                    7: tx_data = current_id[7:0];
+                    8: tx_data = current_timestamp[63:56];
+                    9: tx_data = current_timestamp[55:48];
+                    10: tx_data = current_timestamp[47:40];
+                    11: tx_data = current_timestamp[39:32];
+                    12: tx_data = current_timestamp[31:24];
+                    13: tx_data = current_timestamp[23:16];
+                    14: tx_data = current_timestamp[15:8];
+                    15: tx_data = current_timestamp[7:0];
+                    16: tx_data = current_data[7:0];
+                    17: tx_data = current_data[15:8];
+                    18: tx_data = current_data[23:16];
+                    19: tx_data = current_data[31:24];
+                    20: tx_data = current_data[39:32];
+                    21: tx_data = current_data[47:40];
+                    22: tx_data = current_data[55:48];
+                    23: tx_data = current_data[63:56];
+                    default: tx_data = 8'h00;
+                endcase
+            end else case (record_byte_index)
                 0:  tx_data = {3'b000, current_id[28:24]};
                 1:  tx_data = current_id[23:16];
                 2:  tx_data = current_id[15:8];
@@ -139,11 +243,30 @@ module can_udp_payload_packetizer #(
             header_index      <= 5'd0;
             flush_count       <= {FLUSH_WIDTH{1'b0}};
             sequence_counter  <= 32'd0;
+            packet_session_id <= 32'd0;
         end else begin
             case (state)
                 ST_COLLECT: begin
-                    if (frame_valid && frame_ready) begin
-                        frame_mem[frame_count] <= frame_word;
+                    if ((frame_valid && frame_ready) ||
+                        (error_valid && error_ready) ||
+                        (status_valid && status_ready)) begin
+                        if (frame_count == 0)
+                            packet_session_id <= session_id;
+                        if (error_valid && error_ready) begin
+                            type_mem[frame_count] <= 2'd1;
+                            error_code_mem[frame_count] <= error_code;
+                            error_timestamp_mem[frame_count] <= error_timestamp;
+                        end else if (status_valid && status_ready) begin
+                            type_mem[frame_count] <= 2'd2;
+                            status_flags_mem[frame_count] <= status_flags;
+                            status_level_mem[frame_count] <= status_queue_level;
+                            status_watermark_mem[frame_count] <= status_queue_high_watermark;
+                            status_uptime_mem[frame_count] <= status_uptime_ticks;
+                            status_counters_mem[frame_count] <= status_counters;
+                        end else begin
+                            type_mem[frame_count] <= 2'd0;
+                            frame_mem[frame_count] <= frame_word;
+                        end
                         frame_count <= frame_count + 1'b1;
                         if (frame_count == MAX_FRAMES - 1) begin
                             state <= ST_REQUEST;

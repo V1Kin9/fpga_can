@@ -21,10 +21,13 @@ module tb_can_udp_ipv4_eth_pipeline_top;
     can_udp_ipv4_eth_pipeline_top #(
         .QUEUE_DEPTH(8),
         .MAX_FRAMES_PER_PACKET(2),
-        .FLUSH_CYCLES(20)
+        .FLUSH_CYCLES(20),
+        .FCAN_PROTOCOL_VERSION(1)
     ) dut (
         .clk_50m(clk), .rst_n(rst_n),
         .can_rx(bus), .can_tx(can_tx),
+        .session_id(32'd0), .cdc_protocol_error(1'b0),
+        .mac_underrun_count(16'd0),
         .eth_frame_valid(frame_valid), .eth_frame_ready(frame_ready),
         .eth_frame_length(frame_length),
         .eth_tx_valid(tx_valid), .eth_tx_ready(tx_ready),

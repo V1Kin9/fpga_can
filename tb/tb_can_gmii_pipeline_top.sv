@@ -23,10 +23,12 @@ module tb_can_gmii_pipeline_top;
     can_gmii_pipeline_top #(
         .QUEUE_DEPTH(64),
         .MAX_FRAMES_PER_PACKET(1),
-        .FLUSH_CYCLES(1)
+        .FLUSH_CYCLES(1),
+        .FCAN_PROTOCOL_VERSION(1)
     ) dut (
         .clk_50m(clk_50m), .gmii_clk_125m(gmii_clk_125m),
         .rst_n(rst_n), .can_rx(can_rx), .can_tx(can_tx),
+        .session_id(32'd0),
         .gmii_tx_en(gmii_tx_en), .gmii_tx_er(gmii_tx_er),
         .gmii_txd(gmii_txd), .queue_level(queue_level),
         .can_frame_drop_event(can_frame_drop_event),

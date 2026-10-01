@@ -1,5 +1,7 @@
 `timescale 1ns/1ps
-module can_rx_top (
+module can_rx_top #(
+    parameter integer CAN_BITRATE = 500000
+) (
     input  wire clk_50m,
     input  wire rst_n,
     input  wire can_rx,
@@ -16,6 +18,7 @@ module can_rx_top (
     output wire frame_error,
     output wire error_valid,
     output wire [7:0] error_code,
+    output wire [63:0] error_timestamp,
     input  wire fifo_ready,
     output wire fifo_valid,
     output wire [28:0] fifo_id,
@@ -53,7 +56,8 @@ module can_rx_top (
         .clk(clk_50m), .rst_n(rst_n), .can_rx(can_rx),
         .rx_sync(rx_sync), .rx_prev(rx_prev), .edge_detect(edge_detect)
     );
-    can_bit_timing u_timing(
+    assign error_timestamp = timestamp_counter;
+    can_bit_timing #(.CAN_BITRATE(CAN_BITRATE)) u_timing(
         .clk(clk_50m), .rst_n(rst_n), .rx_sync(rx_sync),
         .edge_detect(edge_detect), .hard_sync_enable(hard_sync_enable),
         .resync_enable(resync_enable), .sample_tick(sample_tick),
