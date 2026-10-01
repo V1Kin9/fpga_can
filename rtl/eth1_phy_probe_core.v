@@ -25,7 +25,14 @@ module eth1_phy_probe_core #(
     output reg         link_up,
     output reg         autoneg_complete,
     output reg [7:0]   snapshot_count,
-    output reg          snapshot_pulse
+    output reg          snapshot_pulse,
+    output wire [6:0]  mdio_bit_index_debug,
+    output wire [4:0]  mdio_phy_addr_debug,
+    output wire [4:0]  mdio_reg_addr_debug,
+    output wire        mdio_start_debug,
+    output wire        mdio_busy_debug,
+    output wire        mdio_done_debug,
+    output wire        mdio_ta_ok_debug
 );
     localparam [3:0] S_RESET = 4'd0, S_POST = 4'd1,
                      S_SCAN_START = 4'd2, S_SCAN_WAIT = 4'd3,
@@ -48,13 +55,20 @@ module eth1_phy_probe_core #(
     wire [15:0] mdio_data;
     wire id_present = mdio_ta_ok && (mdio_data != 16'h0000) &&
                       (mdio_data != 16'hffff);
+    assign mdio_phy_addr_debug = mdio_phy_addr;
+    assign mdio_reg_addr_debug = mdio_reg_addr;
+    assign mdio_start_debug = mdio_start;
+    assign mdio_busy_debug = mdio_busy;
+    assign mdio_done_debug = mdio_done;
+    assign mdio_ta_ok_debug = mdio_ta_ok;
 
     mdio_clause22_reader #(.MDC_HALF_CYCLES(MDC_HALF_CYCLES)) u_reader (
         .clk(clk_50m), .rst_n(rst_n), .start(mdio_start),
         .phy_addr(mdio_phy_addr), .reg_addr(mdio_reg_addr),
         .mdio_in(mdio_in), .mdc(mdc), .mdio_out(mdio_out),
         .mdio_oe(mdio_oe), .busy(mdio_busy), .done(mdio_done),
-        .ta_ok(mdio_ta_ok), .read_data(mdio_data)
+        .ta_ok(mdio_ta_ok), .read_data(mdio_data),
+        .bit_index_debug(mdio_bit_index_debug)
     );
 
     always @(posedge clk_50m or negedge rst_n) begin

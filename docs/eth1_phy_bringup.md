@@ -7,7 +7,7 @@
 - G22 的 50 MHz 板载时钟经 MMCM 产生 125 MHz，使用 ODDR 在 AC2 输出空闲 RGMII TXC。`TX_CTL=0`、`TXD=0`，PHY 内部 TXDLY strap 已提供时钟延时，此阶段不发送数据。
 - D26 外部复位或 MMCM 失锁后，同步释放内部复位；Y2 的 `PHYRSTB` 保持低电平 20 ms，再等待 20 ms 启动时间。
 - MDC 在 W1，频率 1.25 MHz；MDIO 在 AF5。Clause 22 读事务先扫 32 个 PHY 地址的寄存器 2，记录响应掩码和第一个有效地址，再读寄存器 3、0、1、1、17；之后每 100 ms 重读 1、1、17。每次事务后额外发送一个 MDIO 高阻态的空闲 MDC 周期。BMSR 连读两次是为了越过 link bit 的锁存低状态。RTL8211E 允许读数据在 MDC 上升沿后最多 300 ns 才有效，所以在约 400 ns 的高电平末端采样。
-- ILA 记录 MMCM 锁定、125 MHz 域翻转、PHY 复位、扫描结果和寄存器。`snapshot_pulse` 每次状态更新触发一次。
+- ILA 记录 MMCM 锁定、125 MHz 域翻转、PHY 复位、扫描结果和寄存器，并以 4096 个 50 MHz 样本观察一帧完整 MDC/MDIO 读波形。上板脚本先按 `snapshot_pulse` 捕获状态，再按 MDIO 事务起始捕获两帧波形。
 
 ## 构建与捕获
 
@@ -19,7 +19,7 @@
 .\scripts\run_board_eth1_phy.ps1
 ```
 
-实现脚本在临时 ASCII 路径运行 Vivado 2020.1，生成 `build/eth1_phy_impl/eth1_phy.bit`、匹配的 `.ltx`、布线报告和 `provenance.json`。上板脚本要求构建时相关源码已提交、当前 HEAD 与源码哈希仍匹配，随后经 JTAG 下载并采集两次 ILA CSV 到 `build/board_test/eth1_phy_*/`。运行后可用 Vivado Hardware Manager 打开同一 `.bit/.ltx` 查看波形。重新下载此 bitstream 会结束原 CAN-only ILA 的运行。
+实现脚本在临时 ASCII 路径运行 Vivado 2020.1，生成 `build/eth1_phy_impl/eth1_phy.bit`、匹配的 `.ltx`、布线报告和 `provenance.json`。上板脚本要求构建时相关源码已提交、当前 HEAD 与源码哈希仍匹配，随后经 JTAG 下载并采集状态及两次原始 MDIO ILA CSV 到 `build/board_test/eth1_phy_*/`。运行后可用 Vivado Hardware Manager 打开同一 `.bit/.ltx` 查看波形。重新下载此 bitstream 会结束原 CAN-only ILA 的运行。
 
 ## 判读
 

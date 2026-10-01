@@ -33,7 +33,7 @@ proc add_probe {core index names} {
 }
 
 create_debug_core eth1_phy_ila ila
-set_property C_DATA_DEPTH 1024 [get_debug_cores eth1_phy_ila]
+set_property C_DATA_DEPTH 4096 [get_debug_cores eth1_phy_ila]
 set_property C_TRIGIN_EN false [get_debug_cores eth1_phy_ila]
 set_property C_TRIGOUT_EN false [get_debug_cores eth1_phy_ila]
 set_property C_ADV_TRIGGER false [get_debug_cores eth1_phy_ila]
@@ -55,6 +55,17 @@ add_probe eth1_phy_ila 11 [list debug_autoneg_complete]
 add_probe eth1_phy_ila 12 [list debug_mmcm_locked]
 add_probe eth1_phy_ila 13 [list debug_phy_rstn]
 add_probe eth1_phy_ila 14 [list debug_clk125_toggle]
+add_probe eth1_phy_ila 15 [list debug_mdc]
+add_probe eth1_phy_ila 16 [list debug_mdio_in]
+add_probe eth1_phy_ila 17 [list debug_mdio_out]
+add_probe eth1_phy_ila 18 [list debug_mdio_oe]
+add_probe eth1_phy_ila 19 [bus_names debug_mdio_bit_index 7]
+add_probe eth1_phy_ila 20 [bus_names debug_mdio_phy_addr 5]
+add_probe eth1_phy_ila 21 [bus_names debug_mdio_reg_addr 5]
+add_probe eth1_phy_ila 22 [list debug_mdio_start]
+add_probe eth1_phy_ila 23 [list debug_mdio_busy]
+add_probe eth1_phy_ila 24 [list debug_mdio_done]
+add_probe eth1_phy_ila 25 [list debug_mdio_ta_ok]
 report_debug_core -file debug_core.rpt
 puts "ETH1_PHY_ILA_PROBES_CONNECTED"
 

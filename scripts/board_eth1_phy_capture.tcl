@@ -23,23 +23,29 @@ program_hw_devices $device
 refresh_hw_device $device
 set ila [lindex [get_hw_ilas] 0]
 if {$ila eq ""} { error "ETH1 PHY ILA core not found" }
-set probe [get_hw_probes debug_snapshot_pulse -of_objects $ila]
-if {$probe eq ""} { error "debug_snapshot_pulse probe not found" }
+set status_probe [get_hw_probes debug_snapshot_pulse -of_objects $ila]
+set start_probe [get_hw_probes debug_mdio_start -of_objects $ila]
+if {$status_probe eq "" || $start_probe eq ""} { error "ETH1 PHY trigger probes not found" }
 set_property CONTROL.TRIGGER_CONDITION AND $ila
 set_property CONTROL.TRIGGER_POSITION 0 $ila
-set_property TRIGGER_COMPARE_VALUE eq1'b1 $probe
+set_property TRIGGER_COMPARE_VALUE eq1'b1 $status_probe
 
-foreach index {1 2} {
+proc capture {ila work label} {
     run_hw_ila $ila
     if {[catch {wait_on_hw_ila -timeout 5 $ila} reason]} {
-        error "ETH1 PHY ILA capture $index failed: $reason"
+        error "ETH1 PHY ILA capture $label failed: $reason"
     }
     set data [upload_hw_ila_data $ila]
-    set csv [file join $work "eth1_phy_snapshot_$index.csv"]
+    set csv [file join $work "eth1_phy_$label.csv"]
     write_hw_ila_data -csv_file -force $csv $data
-    puts "ETH1_PHY_CAPTURED $index $csv"
+    puts "ETH1_PHY_CAPTURED $label $csv"
     flush stdout
 }
+capture $ila $work status
+set_property TRIGGER_COMPARE_VALUE eq1'b0 $status_probe
+set_property TRIGGER_COMPARE_VALUE eq1'b1 $start_probe
+capture $ila $work mdio_1
+capture $ila $work mdio_2
 close_hw_target $target
 disconnect_hw_server
 close_hw_manager

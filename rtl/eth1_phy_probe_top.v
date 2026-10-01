@@ -72,6 +72,17 @@ module eth1_phy_probe_top (
     wire mdio_out;
     wire mdio_oe;
     assign mdio = mdio_oe ? mdio_out : 1'bz;
+    (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire debug_mdc = mdc;
+    (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire debug_mdio_in = mdio;
+    (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire debug_mdio_out = mdio_out;
+    (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire debug_mdio_oe = mdio_oe;
+    (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire [6:0] debug_mdio_bit_index;
+    (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire [4:0] debug_mdio_phy_addr;
+    (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire [4:0] debug_mdio_reg_addr;
+    (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire debug_mdio_start;
+    (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire debug_mdio_busy;
+    (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire debug_mdio_done;
+    (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire debug_mdio_ta_ok;
 
     (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire debug_mmcm_locked = mmcm_locked;
     (* MARK_DEBUG="TRUE", KEEP="TRUE" *) wire debug_phy_rstn;
@@ -100,6 +111,13 @@ module eth1_phy_probe_top (
         .link_up(debug_link_up),
         .autoneg_complete(debug_autoneg_complete),
         .snapshot_count(debug_snapshot_count),
-        .snapshot_pulse(debug_snapshot_pulse)
+        .snapshot_pulse(debug_snapshot_pulse),
+        .mdio_bit_index_debug(debug_mdio_bit_index),
+        .mdio_phy_addr_debug(debug_mdio_phy_addr),
+        .mdio_reg_addr_debug(debug_mdio_reg_addr),
+        .mdio_start_debug(debug_mdio_start),
+        .mdio_busy_debug(debug_mdio_busy),
+        .mdio_done_debug(debug_mdio_done),
+        .mdio_ta_ok_debug(debug_mdio_ta_ok)
     );
 endmodule

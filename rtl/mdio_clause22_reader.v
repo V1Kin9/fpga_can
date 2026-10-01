@@ -18,12 +18,14 @@ module mdio_clause22_reader #(
     output reg         busy,
     output reg         done,
     output reg         ta_ok,
-    output reg [15:0]  read_data
+    output reg [15:0]  read_data,
+    output wire [6:0] bit_index_debug
 );
     reg [4:0] phy_latched;
     reg [4:0] reg_latched;
     reg [6:0] bit_index;
     reg [15:0] half_count;
+    assign bit_index_debug = bit_index;
 
     function automatic frame_bit;
         input [6:0] index;

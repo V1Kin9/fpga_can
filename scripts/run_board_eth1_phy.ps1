@@ -49,13 +49,13 @@ try {
             -not (Select-String -LiteralPath 'board_console.log' -Pattern 'ETH1_PHY_BOARD_CAPTURE_PASS' -Quiet)) {
             throw 'ETH1 JTAG capture failed; see board_console.log'
         }
-        foreach ($name in @('eth1_phy_snapshot_1.csv','eth1_phy_snapshot_2.csv')) {
+        foreach ($name in @('eth1_phy_status.csv','eth1_phy_mdio_1.csv','eth1_phy_mdio_2.csv')) {
             if (-not (Test-Path -LiteralPath $name)) { throw "Missing ILA capture: $name" }
         }
         $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
         $output = Join-Path $root "build\board_test\eth1_phy_$stamp"
         New-Item -ItemType Directory -Force -Path $output | Out-Null
-        Copy-Item -LiteralPath @('eth1_phy_snapshot_1.csv','eth1_phy_snapshot_2.csv','board_console.log','provenance.json') -Destination $output
+        Copy-Item -LiteralPath @('eth1_phy_status.csv','eth1_phy_mdio_1.csv','eth1_phy_mdio_2.csv','board_console.log','provenance.json') -Destination $output
         Write-Host "ETH1_PHY_BOARD_CAPTURE_PASS; outputs: $output"
         $success = $true
     } finally { Pop-Location }
