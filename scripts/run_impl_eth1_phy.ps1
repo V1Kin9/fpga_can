@@ -47,8 +47,14 @@ try {
         $blocking = @(Select-String -LiteralPath 'impl_console.log' -Pattern '^(ERROR:|CRITICAL WARNING:)' |
             Where-Object { $_.Line -notmatch '^CRITICAL WARNING: \[Common 17-741\] No write access right to the local Tcl store' })
         if ($blocking.Count -ne 0) { throw 'Vivado reported an error or critical warning' }
-        foreach ($name in @('eth1_phy.bit','eth1_phy.ltx','routed_timing.rpt','routed_drc.rpt','check_timing.rpt')) {
+        foreach ($name in @('eth1_phy.bit','eth1_phy.ltx','routed_timing.rpt','routed_drc.rpt','routed_bus_skew.rpt','check_timing.rpt')) {
             if (-not (Test-Path -LiteralPath $name)) { throw "Missing output: $name" }
+        }
+        if (-not (Select-String -LiteralPath 'routed_timing.rpt' -Pattern 'All user specified timing constraints are met' -Quiet)) {
+            throw 'Routed timing constraints are not met'
+        }
+        if (Select-String -LiteralPath 'routed_bus_skew.rpt' -Pattern 'Slack \(VIOLATED\)' -Quiet) {
+            throw 'Routed bus skew constraint violated'
         }
         foreach ($path in $files) {
             $target = Join-Path $work (Split-Path -Leaf $path)

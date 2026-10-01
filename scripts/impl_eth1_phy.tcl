@@ -65,6 +65,7 @@ report_timing_summary -delay_type min_max -check_timing_verbose -file placed_tim
 route_design
 report_drc -file routed_drc.rpt
 report_timing_summary -delay_type min_max -check_timing_verbose -file routed_timing.rpt
+report_bus_skew -file routed_bus_skew.rpt
 check_timing -verbose -file check_timing.rpt
 report_clock_interaction -file clock_interaction.rpt
 report_utilization -file routed_utilization.rpt
