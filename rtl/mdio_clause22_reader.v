@@ -4,7 +4,8 @@
 // leaving setup/hold margin at both clock edges. RTL8211E permits PHY data
 // valid up to 300 ns after MDC rises; sample at the following falling edge.
 module mdio_clause22_reader #(
-    parameter integer MDC_HALF_CYCLES = 20
+    parameter integer MDC_HALF_CYCLES = 20,
+    parameter integer PHY_RX_ADVANCE = 0
 ) (
     input  wire        clk,
     input  wire        rst_n,
@@ -82,8 +83,12 @@ module mdio_clause22_reader #(
                     mdc <= 1'b1;
                 end else begin
                     mdc <= 1'b0;
-                    if (bit_index == 7'd47) ta_ok <= !mdio_in;
-                    if (bit_index >= 7'd48 && bit_index <= 7'd63)
+                    // This board's RTL8211E readback is observed one MDC
+                    // cycle ahead of the nominal Clause 22 receive slots.
+                    if (bit_index == 7'd47-PHY_RX_ADVANCE)
+                        ta_ok <= !mdio_in;
+                    if (bit_index >= 7'd48-PHY_RX_ADVANCE &&
+                        bit_index <= 7'd63-PHY_RX_ADVANCE)
                         read_data <= {read_data[14:0], mdio_in};
                     if (bit_index == 7'd64) begin
                         busy <= 1'b0;

@@ -49,7 +49,7 @@ set_property TRIGGER_COMPARE_VALUE eq1'b1 $start_probe
 set_property TRIGGER_COMPARE_VALUE eq5'h02 $reg_probe
 set_property TRIGGER_COMPARE_VALUE eq5'h01 $addr_probe
 capture $ila $work mdio_1
-set_property TRIGGER_COMPARE_VALUE eq5'h00 $addr_probe
+set_property TRIGGER_COMPARE_VALUE eq5'h01 $addr_probe
 set_property TRIGGER_COMPARE_VALUE eq5'h01 $reg_probe
 capture $ila $work mdio_2
 set_property TRIGGER_COMPARE_VALUE eq1'bx $start_probe

@@ -62,7 +62,9 @@ module eth1_phy_probe_core #(
     assign mdio_done_debug = mdio_done;
     assign mdio_ta_ok_debug = mdio_ta_ok;
 
-    mdio_clause22_reader #(.MDC_HALF_CYCLES(MDC_HALF_CYCLES)) u_reader (
+    mdio_clause22_reader #(
+        .MDC_HALF_CYCLES(MDC_HALF_CYCLES), .PHY_RX_ADVANCE(1)
+    ) u_reader (
         .clk(clk_50m), .rst_n(rst_n), .start(mdio_start),
         .phy_addr(mdio_phy_addr), .reg_addr(mdio_reg_addr),
         .mdio_in(mdio_in), .mdc(mdc), .mdio_out(mdio_out),
@@ -75,7 +77,7 @@ module eth1_phy_probe_core #(
         if (!rst_n) begin
             state <= S_RESET;
             wait_count <= 32'd0;
-            scan_addr <= 5'd0;
+            scan_addr <= 5'd1;
             mdio_start <= 1'b0;
             mdio_phy_addr <= 5'd0;
             mdio_reg_addr <= 5'd0;
@@ -106,7 +108,7 @@ module eth1_phy_probe_core #(
                 S_POST: begin
                     if (wait_count == POST_RESET_CYCLES-1) begin
                         wait_count <= 32'd0;
-                        scan_addr <= 5'd0;
+                        scan_addr <= 5'd1;
                         state <= S_SCAN_START;
                     end else wait_count <= wait_count + 32'd1;
                 end
@@ -197,7 +199,7 @@ module eth1_phy_probe_core #(
                         if (found_valid) state <= S_BMSR1_START;
                         else begin
                             found_mask <= 32'd0;
-                            scan_addr <= 5'd0;
+                            scan_addr <= 5'd1;
                             state <= S_SCAN_START;
                         end
                     end else wait_count <= wait_count + 32'd1;

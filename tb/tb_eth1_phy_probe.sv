@@ -46,6 +46,7 @@ module tb_eth1_phy_probe;
     integer transaction_count = 0;
     integer idle_count = 0;
     integer bmsr_count = 0;
+    integer broadcast_reads = 0;
 
     always @(posedge mdio_oe) begin
         bit_index = 0;
@@ -69,6 +70,7 @@ module tb_eth1_phy_probe;
             cmd_reg = {cmd_reg[3:0], mdio_line};
         if (bit_index == 45) begin
             transaction_count = transaction_count + 1;
+            if (cmd_phy == 5'd0) broadcast_reads = broadcast_reads + 1;
             if (cmd_phy == response_addr && respond_enabled) begin
                 case (cmd_reg)
                     5'd0: response = 16'h1140;
@@ -94,15 +96,15 @@ module tb_eth1_phy_probe;
         end
         // The Realtek PHY is permitted to make data valid *after* this
         // rising edge. This model deliberately changes it after the edge.
-        if (respond_enabled && cmd_phy == response_addr && bit_index == 47) begin
+        if (respond_enabled && cmd_phy == response_addr && bit_index == 46) begin
             #30; // 30/40 ns models 300/400 ns PHY-valid/high-time limit
             slave_oe = 1'b1;
             slave_out = 1'b0;
         end else if (respond_enabled && cmd_phy == response_addr &&
-                     bit_index >= 48 && bit_index <= 63) begin
+                     bit_index >= 47 && bit_index <= 62) begin
             #30;
             slave_oe = 1'b1;
-            slave_out = response[63-bit_index];
+            slave_out = response[62-bit_index];
         end
     end
 
@@ -119,7 +121,7 @@ module tb_eth1_phy_probe;
         if (bit_index < 64) begin
             bit_index = bit_index + 1;
             if (bit_index == 46) slave_oe = 1'b0;
-            if (bit_index == 64) slave_oe = 1'b0;
+            if (bit_index == 63) slave_oe = 1'b0;
         end else slave_oe = 1'b0;
     end
 
@@ -138,8 +140,9 @@ module tb_eth1_phy_probe;
             bmcr !== 16'h1140 || bmsr !== 16'h782d || physr !== 16'hac00 ||
             !link_up || !autoneg_complete || snapshot_count !== 8'd1)
             $fatal(1, "PHY scan/status mismatch mask=%h id=%h:%h bmcr=%h bmsr=%h", found_mask, phy_id1, phy_id2, bmcr, bmsr);
-        if (transaction_count != 37 || idle_count != transaction_count || bmsr_count != 2)
-            $fatal(1, "Expected 32 address scans, five register reads, and one idle bit per read");
+        if (transaction_count != 36 || idle_count != transaction_count ||
+            bmsr_count != 2 || broadcast_reads != 0)
+            $fatal(1, "Expected 31 unicast scans, five register reads, and idle bits");
 
         link_mode = 1'b0;
         wait (snapshot_count == 8'd2);
