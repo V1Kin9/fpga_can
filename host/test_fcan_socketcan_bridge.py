@@ -1,9 +1,12 @@
 """SocketCAN conversion tests that need neither Linux nor a vcan device."""
 
 import sys
+from contextlib import redirect_stderr
+from io import StringIO
 import unittest
+from unittest.mock import patch
 
-from fcan_socketcan_bridge import Bridge, CAN_EFF_FLAG, CAN_RTR_FLAG
+from fcan_socketcan_bridge import Bridge, CAN_EFF_FLAG, CAN_RTR_FLAG, main
 
 
 class FakeCanSink:
@@ -176,6 +179,59 @@ class BridgeTest(unittest.TestCase):
             fcan_v2_packet(2, 2, fcan_v2_record(0x103))), 1)
         self.assertEqual([unpack_frame(frame)[0] for frame in self.sink.frames],
                          [0x100, 0x101, 0x103])
+
+    def test_foreign_sender_cannot_retire_the_active_session(self):
+        bridge = Bridge(self.sink, expected_source_ip="192.0.2.10")
+        self.assertEqual(bridge.process_datagram(
+            fcan_v2_packet(10, 1, fcan_v2_record(0x100)),
+            source_ip="192.0.2.10"), 1)
+        self.assertEqual(bridge.process_datagram(
+            fcan_v2_packet(0, 2), source_ip="192.0.2.11"), 0)
+        self.assertEqual(bridge.process_datagram(fcan_v2_packet(0, 2)), 0)
+        self.assertEqual(bridge.process_datagram(
+            fcan_v2_packet(11, 1, fcan_v2_record(0x101)),
+            source_ip="192.0.2.10"), 1)
+        self.assertEqual(bridge.previous_session, 1)
+        self.assertEqual(bridge.reset_epochs, 0)
+        self.assertEqual(bridge.foreign_packets, 2)
+        self.assertEqual([unpack_frame(frame)[0] for frame in self.sink.frames],
+                         [0x100, 0x101])
+
+    def test_empty_new_session_does_not_retire_the_active_session(self):
+        self.assertEqual(self.bridge.process_datagram(
+            fcan_v2_packet(10, 1, fcan_v2_record(0x100))), 1)
+        self.assertEqual(self.bridge.process_datagram(fcan_v2_packet(0, 2)), 0)
+        self.assertEqual(self.bridge.process_datagram(
+            fcan_v2_packet(11, 1, fcan_v2_record(0x101))), 1)
+        self.assertEqual(self.bridge.previous_session, 1)
+        self.assertEqual(self.bridge.reset_epochs, 0)
+        self.assertEqual([unpack_frame(frame)[0] for frame in self.sink.frames],
+                         [0x100, 0x101])
+
+    def test_retired_session_history_has_a_fixed_limit(self):
+        bridge = Bridge(self.sink, max_retired_sessions=3)
+        for session in range(1, 6):
+            self.assertEqual(bridge.process_datagram(
+                fcan_v2_packet(0, session, fcan_v2_record(0x100 + session))), 1)
+        self.assertEqual(len(bridge.retired_sessions), 3)
+        self.assertEqual(bridge.retired_history_evictions, 1)
+        self.assertEqual(bridge.process_datagram(
+            fcan_v2_packet(1, 4, fcan_v2_record(0x200))), 0)
+        self.assertEqual(bridge.previous_session, 5)
+
+    def test_network_bind_requires_a_source_filter(self):
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit) as raised:
+            main(["--bind", "0.0.0.0"])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_network_source_filter_reaches_the_listener(self):
+        with patch("fcan_socketcan_bridge.sys.platform", "linux"), \
+                patch("fcan_socketcan_bridge.listen") as listen:
+            self.assertEqual(main(["--bind", "0.0.0.0",
+                                   "--source-ip", "192.0.2.10"]), 0)
+        listen.assert_called_once_with("0.0.0.0", 5000, "vcan0",
+                                       expected_source_ip="192.0.2.10",
+                                       verbose=False)
 
     def test_duplicate_and_reordered_datagrams_are_dropped(self):
         self.send(20, fcan_record(0x100))

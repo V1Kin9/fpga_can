@@ -109,8 +109,8 @@ CAN RX → 单帧缓冲 → 多帧队列 → FCAN 打包器 → 数据报请求/
 python3 host/can_udp_decode.py --bind 0.0.0.0 --port 5000
 ```
 
-`can_udp_decode.py` 校验 magic、版本、头/记录长度、保留位、ID 范围和载荷总长度。`fcan_socketcan_bridge.py` 只把 CRC 正确的 CAN_FRAME 写入 Linux SocketCAN；CAN_ERROR/DEVICE_STATUS 以日志报告。普通 `can_frame.len` 将 DLC 9～15 钳为 8。bridge 检测序号间隙、重复、倒序和自然环绕；v2 session ID 改变时关闭旧 session，之后到达的旧 session 延迟包会被丢弃，避免重新注入陈旧 CAN 帧。v1 以及复用同一 session ID 的 v2 流都对非环绕的序号归零采用启发式重启判断；若同一 session 重启后的零号包丢失，仍无法无歧义判断新轮次，因此板级 session ID 仍应尽量保证每次启动不同。离线抓包工具见 [诊断架构](diagnostics.md)。
+`can_udp_decode.py` 校验 magic、版本、头/记录长度、保留位、ID 范围和载荷总长度。`fcan_socketcan_bridge.py` 只把 CRC 正确的 CAN_FRAME 写入 Linux SocketCAN；CAN_ERROR/DEVICE_STATUS 以日志报告。普通 `can_frame.len` 将 DLC 9～15 钳为 8。bridge 拒绝不含记录的空包，避免它改变当前 session；还检测序号间隙、重复、倒序和自然环绕。v2 session ID 改变时保存旧 ID，之后到达的最近 256 个已退休 session 的延迟包会被丢弃。超过窗口的旧 ID 无法无限期识别。非回环 UDP 监听必须配置 `--source-ip`，只接受该来源；这不是身份认证，实包接入应使用可信隔离网络。v1 以及复用同一 session ID 的 v2 流都对非环绕的序号归零采用启发式重启判断；若同一 session 重启后的零号包丢失，仍无法无歧义判断新轮次，因此板级 session ID 仍应尽量保证每次启动不同。离线抓包工具见 [诊断架构](diagnostics.md)。
 
 ## 验证边界
 
-CI 覆盖队列顺序/反压、打包、字段编码、主机解码、SocketCAN 转换及完整 CAN 波形→GMII 仿真；Vivado 综合和 CDC/DRC 报告由本地脚本生成。实际 RGMII、PHY、线缆、车辆总线和主机实包仍需实体板卡。详见 [无板验证记录](pre_board_verification.md)。
+CI 覆盖队列顺序/反压、打包、字段编码、主机解码、SocketCAN 转换及完整 CAN 波形→GMII 仿真；Vivado 综合和 CDC/DRC 报告由本地脚本生成。CAN-only 500 kbit/s 标准单帧已有 [首次板级证据](can_board_bringup.md)。实际 RGMII、PHY、以太网线缆、车辆总线和主机实包尚未验证，见 [无板验证记录](pre_board_verification.md)。

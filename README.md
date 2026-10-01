@@ -1,6 +1,6 @@
 # Kintex-7 被动 CAN 接收与 GMII 发送链
 
-本工程面向 Kintex-7 `XC7K325T-2FFG676C`，实现 Classical CAN 2.0A/2.0B 被动接收、FCAN UDP 封装及 GMII 发送。CAN 速率可在 125/250/500/1000 kbit/s 间用 `CAN_BITRATE` 参数选择，默认 500 kbit/s，采样点维持 80%。集成顶层默认发送 FCAN v2，主机仍支持 v1。CAN TXD 恒为隐性电平；RTL 不生成 ACK、主动 CAN 帧或错误帧。当前没有实体 FPGA，验证边界位于 GMII 与 Linux 主机的 SocketCAN 转换。
+本工程面向 Kintex-7 `XC7K325T-2FFG676C`，实现 Classical CAN 2.0A/2.0B 被动接收、FCAN UDP 封装及 GMII 发送。CAN 速率可在 125/250/500/1000 kbit/s 间用 `CAN_BITRATE` 参数选择，默认 500 kbit/s，采样点维持 80%。集成顶层默认发送 FCAN v2，主机仍支持 v1。CAN TXD 恒为隐性电平；RTL 不生成 ACK、主动 CAN 帧或错误帧。2026-10-01 已完成 CAN-only、500 kbit/s 标准帧的实体板卡 ILA 首次验证；GMII 后的 RGMII/PHY 和 Linux 实包链路仍未上板贯通。
 
 ```text
 CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/IPv4/Ethernet II
@@ -16,8 +16,9 @@ CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/I
 - 既有 16 个 HDL 顶层保留；新增 FCAN v2 字节布局、诊断/CDC、10,000 条帧队列入口随机压力、128 条实际 CAN 总线随机波形和四速率矩阵。完整 CAN→GMII 测试比较 37 帧的全部 GMII 字节、FCS 和 IFG。
 - 主机单元测试覆盖双版本解码、session 切换、类型记录、SocketCAN 16 字节转换、PCAPNG 与 compact log 的字节布局；无需真实 vcan。Linux 可选 `scripts/test_vcan_integration.sh` 会在缺少权限时清楚跳过。
 - Vivado 2020.1 综合、时序、DRC 和 CDC 报告由 `run_gmii_synth.ps1` 生成。未指定的板级引脚使 DRC 保留告警；综合结果不代表板级时序签核。
+- CAN-only 原有 ILA bitstream 在隔离桌面总线上收到 `0x123`/DLC 1/`A5`，CRC、`frame_valid` 和 FIFO 输出均通过；这只证明一帧的 500 kbit/s 接收路径，见 [上板记录](docs/can_board_bringup.md)。
 
-各项证据、告警解释和剩余板级工作见 [无实体板卡验证记录](docs/pre_board_verification.md)。
+无板阶段的仿真、综合证据和剩余 GMII 板级工作见 [无板验证记录](docs/pre_board_verification.md)。
 
 ## 目录与文档
 
@@ -28,6 +29,7 @@ CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/I
 | `scripts/` | Vivado 2020.1 仿真、综合、CAN-only ILA 实现脚本 |
 | `host/` | FCAN v1/v2 解码器、Linux SocketCAN bridge、PCAPNG/compact log 抓包及单元测试 |
 | [CAN 接收设计](docs/can_rx_design.md) | 协议、位时序、复位和安全接线 |
+| [CAN-only 上板记录](docs/can_board_bringup.md) | 2026-10-01 桌面隔离总线首帧与验证边界 |
 | [FCAN 载荷协议](docs/can_udp_protocol.md) | 数据报和记录的字节格式 |
 | [诊断与抓包](docs/diagnostics.md) | 错误/状态计数、CDC、时间戳及离线格式 |
 | [Ethernet/IPv4/UDP 封装](docs/ethernet_udp_frame.md) | 网络头部、默认地址及握手 |
@@ -90,11 +92,11 @@ D13/B14 与板卡 camera2 接口复用，不能同时启用。FPGA 不可直接�
 sudo modprobe vcan
 sudo ip link add dev vcan0 type vcan
 sudo ip link set up vcan0
-python3 host/fcan_socketcan_bridge.py --bind 0.0.0.0 --port 5000 --interface vcan0
+python3 host/fcan_socketcan_bridge.py --bind 127.0.0.1 --port 5000 --interface vcan0
 candump vcan0
 ```
 
-`--verbose` 打印 FPGA 时间戳、数据报序号和原始 DLC。bridge 检测丢包、重复、倒序和序号环绕；v2 通过外部提供的 `session_id` 识别重启，v1 仍使用归零启发式判断。普通 SocketCAN 时间戳由主机内核产生，不能替代 FPGA SOF 时间戳。真实 vcan 可选脚本与离线抓包方式见 [诊断与抓包](docs/diagnostics.md)；尚未在实体以太网链路上贯通。
+此处回环地址用于主机本地验证。接收实体 FPGA 的 UDP 时，`--bind` 指向主机以太网地址，并必须用 `--source-ip` 指定 FPGA 的源 IPv4 地址；bridge 拒绝其他来源。源 IP 过滤不能抵御同网段地址伪造，实包接入应放在可信、隔离的网络。`--verbose` 打印 FPGA 时间戳、数据报序号和原始 DLC。bridge 检测丢包、重复、倒序和序号环绕；v2 通过外部提供的 `session_id` 识别重启，保留最近 256 个已退休 session 以拒绝迟到包，v1 仍使用归零启发式判断。普通 SocketCAN 时间戳由主机内核产生，不能替代 FPGA SOF 时间戳。真实 vcan 可选脚本与离线抓包方式见 [诊断与抓包](docs/diagnostics.md)；尚未在实体以太网链路上贯通。
 
 ## 当前不包含
 

@@ -2,6 +2,8 @@
 
 本记录对应 `can_gmii_pipeline_top`，目标器件 `xc7k325tffg676-2`，本地工具 Vivado 2020.1。它验证可移植的 CAN→GMII RTL、FCAN v1/v2 主机处理与离线格式；GMII 后的物理以太网链路尚不存在。
 
+这是实体板卡接入前的验证快照。2026-10-01 的 CAN-only 首帧上板结果另见 [上板记录](can_board_bringup.md)；它不构成 GMII/RGMII 的物理验证。
+
 ## 重跑方法
 
 ```powershell
@@ -72,12 +74,12 @@ Linux [UAPI `can.h`](https://github.com/torvalds/linux/blob/master/include/uapi/
 
 FPGA SOF 时间戳为 50 MHz 计数，1 tick = 20 ns。普通 SocketCAN 写入不能赋予该帧外部 RX 时间戳；`candump` 所见时间由 Linux/vcan 产生。bridge 可用 `--verbose` 打印原始 `fpga_ts`，不伪造内核时间。实际 vcan/candump 贯通测试需在可用 Linux 主机上执行；目前只完成模拟输出端测试。
 
-FPGA 复位会让 FCAN sequence 从 0 重启。bridge 将正常的 `0xffffffff → 0` 视为环绕。v2 的 `session_id` 变化会关闭旧 session，后续迟到的已关闭 session 数据报直接丢弃，不允许它再次切换当前 epoch；如果 v2 复用了同一个 session ID，则与 v1 一样使用“非环绕序号归零”作为重启兜底。若这种同 session 重启的零号包也丢失，主机仍无法仅靠现有字段无歧义识别，因此板级 session ID 应尽量保证每次启动不同。纯 FPGA RTL **没有**持久化 boot epoch，来源仍待板级集成决定，详见 [协议](can_udp_protocol.md) 和 [诊断](diagnostics.md)。
+FPGA 复位会让 FCAN sequence 从 0 重启。bridge 将正常的 `0xffffffff → 0` 视为环绕。v2 的 `session_id` 变化会关闭旧 session；主机保存最近 256 个已关闭 session，拒绝它们的迟到包，且需配置预期 FPGA 源 IP 才能监听非回环网络。超过该历史窗口的旧 ID 无法保证被识别；源 IP 过滤也不等于身份认证，应使用可信隔离网络。如果 v2 复用了同一个 session ID，则与 v1 一样使用“非环绕序号归零”作为重启兜底。若这种同 session 重启的零号包也丢失，主机仍无法仅靠现有字段无歧义识别，因此板级 session ID 应尽量保证每次启动不同。纯 FPGA RTL **没有**持久化 boot epoch，来源仍待板级集成决定，详见 [协议](can_udp_protocol.md) 和 [诊断](diagnostics.md)。
 
 ## 尚未验证与板到手后的次序
 
-- CAN 收发器电气、真实 125/250/500/1000 kbit/s 总线、车辆/OBD 捕获以及实体 FPGA 引脚正确性。
+- CAN 收发器电气参数与终端阻值、标准/扩展/RTR/连续帧、其他速率、长期误码及车辆/OBD 捕获。500 kbit/s 单帧与 D13 输入已有 [首次板级证据](can_board_bringup.md)。
 - 以太网 125 MHz 时钟来源、RGMII DDR、TXC 相位/PCB skew、RTL8211E strap/MDIO、物理链路和 Wireshark 实包。
 - 板级 I/O 电平/位置、输出延迟、place/route、hold 与最终 DRC/STA。
 
-板到手后先核对板卡版本、原理图、收发器与电压；用既有 CAN-only ILA 流在安全隔离的测试总线上核对 RXD。随后确定 125 MHz 时钟及 RTL8211E 的 TXC 延时方案，依据实物添加引脚和源同步时序约束，再实现 RGMII/PHY 层并完成 place/route、CDC、DRC、时序和实包抓取。最后将 FPGA 发出的 FCAN UDP 接入 Linux bridge，用 `candump`/`cansniffer` 对照 FPGA 时间戳与 CAN 发端测试向量。
+CAN-only ILA 已在安全隔离总线上完成首帧核对，下一步按 [上板记录](can_board_bringup.md) 补充帧型和连续流。随后确定 125 MHz 时钟及 RTL8211E 的 TXC 延时方案，依据实物添加引脚和源同步时序约束，再实现 RGMII/PHY 层并完成 place/route、CDC、DRC、时序和实包抓取。最后将 FPGA 发出的 FCAN UDP 接入 Linux bridge，用 `candump`/`cansniffer` 对照 FPGA 时间戳与 CAN 发端测试向量。
