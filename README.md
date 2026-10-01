@@ -16,7 +16,7 @@ CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/I
 - 既有 16 个 HDL 顶层保留；新增 FCAN v2 字节布局、诊断/CDC、10,000 条帧队列入口随机压力、128 条实际 CAN 总线随机波形和四速率矩阵。完整 CAN→GMII 测试比较 37 帧的全部 GMII 字节、FCS 和 IFG。
 - 主机单元测试覆盖双版本解码、session 切换、类型记录、SocketCAN 16 字节转换、PCAPNG 与 compact log 的字节布局；无需真实 vcan。Linux 可选 `scripts/test_vcan_integration.sh` 会在缺少权限时清楚跳过。
 - Vivado 2020.1 综合、时序、DRC 和 CDC 报告由 `run_gmii_synth.ps1` 生成。未指定的板级引脚使 DRC 保留告警；综合结果不代表板级时序签核。
-- 当前 `main` 重新生成的 CAN-only ILA bitstream 已在隔离桌面总线上通过七种 500 kbit/s 单次帧：标准 DLC 0/1/8、位填充数据、扩展数据、标准 RTR 与扩展 RTR。CRC、`frame_valid` 和 FIFO 均通过，原始捕获见 [上板记录](docs/can_board_bringup.md)。持续流、多速率和原始 DLC 9～15 尚未实测。
+- CAN-only ILA bitstream 已在隔离桌面总线上通过七种 500 kbit/s 单次帧：标准 DLC 0/1/8、位填充数据、扩展数据、标准 RTR 与扩展 RTR。PR #8 review 修复后的重建与复测将构建源码哈希绑定到 bitstream，CRC、`frame_valid` 和 FIFO 均通过，原始捕获与验证边界见 [上板记录](docs/can_board_bringup.md)。持续流、多速率和原始 DLC 9～15 尚未实测。
 
 无板阶段的仿真、综合证据和剩余 GMII 板级工作见 [无板验证记录](docs/pre_board_verification.md)。
 
@@ -71,7 +71,7 @@ C:\Xilinx\Vivado\2020.1\bin\vivado.bat -mode batch -source scripts/create_projec
 .\scripts\run_impl_ila.ps1
 ```
 
-ILA 产物位于 `build/impl_ila/can_ila.bit` 和 `can_ila.ltx`。脚本完成综合、调试核插入、布局布线与报告生成；生成 bitstream 不代表已在实体板卡和 CAN 总线上验证。
+ILA 产物位于 `build/impl_ila/can_ila.bit` 和 `can_ila.ltx`；`provenance.json` 记录构建时 HEAD、源码文件哈希和匹配的 bitstream/探针哈希。脚本完成综合、调试核插入、布局布线与报告生成；生成 bitstream 不代表已在实体板卡和 CAN 总线上验证。
 
 此台 Windows 主机上的 Vivado 2020.1 会把 `%TEMP%` 中的隐藏 `AppData` 路径规范化错误，而直接在中文路径中实现会使 Tcl 崩溃。重建这次实测 bitstream 时，临时将工作目录映射成纯 ASCII 盘符（先确认 `W:` 未被占用）：
 
@@ -80,7 +80,7 @@ subst W: 'C:\work\Kintex_BaseC开发板资料'
 try { .\scripts\run_impl_ila.ps1 -WorkRoot 'W:\' } finally { subst W: /D }
 ```
 
-连接好隔离桌面总线并确认 CANable 端口后，可运行 `run_board_can_matrix.ps1 -PortName COM7`。脚本会重新配置 FPGA、逐例发送一帧并校验 ILA 捕获；原始 CSV 与结果写在 `build/board_test/matrix_*/`。当前实测的归档见 [CAN-only 上板记录](docs/can_board_bringup.md)。
+连接好隔离桌面总线并确认 CANable 端口后，可运行 `run_board_can_matrix.ps1 -PortName COM7`。脚本会先检查用例名是否重复、源码与构建来源是否匹配，再从本次输出目录的 `.bit/.ltx` 重新配置 FPGA、逐例发送一帧并校验 ILA 捕获；原始 CSV、构建来源与结果写在 `build/board_test/matrix_*/`。若 bitstream 缺少来源记录，需先重建。当前实测的归档见 [CAN-only 上板记录](docs/can_board_bringup.md)。
 
 | 信号 | FPGA 引脚 | 电平 | 作用 |
 | --- | --- | --- | --- |

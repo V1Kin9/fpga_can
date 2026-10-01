@@ -4,7 +4,7 @@
 
 - Kintex-7 `xc7k325t`、Vivado 2020.1，经 JTAG 加载仓库 CAN-only 流生成的 `build/impl_ila/can_ila.bit` 及匹配的 `.ltx`。测试时 RTL 对应 PR #7 的 `7cfef22`；这轮后续只修改主机工具和文档。
 - 隔离桌面总线只有 CANable 与标称 SN65HVD230 的 3.3 V 蓝色收发器模块，没有连接车辆或 OBD。两端 CANH 对 CANH、CANL 对 CANL，并接公共地；模块 RX 接 FPGA D13，TX 未连接。FPGA B14 的 `can_tx` 在 RTL 中恒为隐性高电平。
-- CANable 使用串口固件、500 kbit/s、关闭自动重发，发送标准数据帧 `t1231A5`（ID `0x123`、DLC 1、数据 `A5`）。
+- CANable 使用串口固件、500 kbit/s，发送前配置 `A0`（关闭自动重发），发送标准数据帧 `t1231A5`（ID `0x123`、DLC 1、数据 `A5`）。
 - 蓝色模块上的黄色跨接帽所处两针是 CANH、CANL 引出针；跨接会短路总线。移除后 FPGA 才捕获到 D13 下降沿。模块板上可见 120 Ω 电阻，CANable 的 120 Ω 跳帽已接入，但万用表故障，未量得实际 CANH–CANL 终端阻值。微雪资料也明确提醒[不要短接 CANH 与 CANL](https://www.waveshare.net/wiki/SN65HVD230_CAN_Board)。
 
 ## 实测结果
@@ -38,7 +38,15 @@ Vivado 报告配置完成，找到一个 ILA。原有 bitstream 对 `debug_frame
 | `std_rtr` | `0x456` | 0 | 1 | 4 | `0x0000000000000000` | PASS |
 | `ext_rtr` | `0x01ABCDE3` | 1 | 1 | 2 | `0x0000000000000000` | PASS |
 
-每份 1024 样本的原始 ILA CSV 都只有一个 `debug_frame_valid` 脉冲；该样本的 ID、IDE、RTR、DLC、DATA、CRC 均匹配预期，下一样本有且仅有一次 `fifo_valid`。整个捕获窗口均未见 `debug_error` 或 `fifo_overflow`。完整原始 CSV、[汇总](evidence/can_board_matrix_20261001/summary.csv)和[测试清单](evidence/can_board_matrix_20261001/manifest.json)已存档；清单记录 Git HEAD 及 bitstream/探针文件 SHA-256。ILA 在 50 MHz 下的 1024 样本只覆盖帧结束附近约 20.48 µs，不能据此声称捕获了整个 CAN 波形。
+每份 1024 样本的原始 ILA CSV 都只有一个 `debug_frame_valid` 脉冲；该样本的 ID、IDE、RTR、DLC、DATA、CRC 均匹配预期，下一样本有且仅有一次 `fifo_valid`。整个捕获窗口均未见 `debug_error` 或 `fifo_overflow`。[首轮汇总](evidence/can_board_matrix_20261001/summary.csv)和[首轮清单](evidence/can_board_matrix_20261001/manifest.json)保留为历史记录。其中 `GitHead` 仅表示执行测试时的源码 HEAD，不能单独证明 bitstream 由该 HEAD 构建。ILA 在 50 MHz 下的 1024 样本只覆盖帧结束附近约 20.48 µs，不能据此声称捕获了整个 CAN 波形。
+
+## PR #8 review 修复后的复测
+
+修复测试脚本后，用相对 `-WorkRoot '.'` 在 ASCII 映射盘 `W:` 重新运行 Vivado 2020.1；CAN-only ILA bitgen 成功。构建时 Git HEAD 为 `ec862713ae8c428718b9e50c69582852ef5f6d69`，来源记录中的 `SourceTreeDirty=false`。布线后[时序](evidence/can_ila_impl_20261001_verified/routed_timing.rpt) WNS `+14.866 ns`、WHS `+0.049 ns`；[四组 bus skew](evidence/can_ila_impl_20261001_verified/routed_bus_skew.rpt) 均满足；[DRC](evidence/can_ila_impl_20261001_verified/routed_drc.rpt) 无 Error，保留调试核内部一项 `RTSTAT-10` Warning。
+
+新脚本在上板前核对源码、约束、实现脚本、bitstream 与探针文件的 SHA-256；将匹配的 `.bit/.ltx` 复制到本次输出目录，Vivado 从该目录配置 FPGA。2026-10-01 对上述七种 500 kbit/s 单次帧全部重新捕获并通过。每份 CSV 仍只有一个 `frame_valid`，CRC、字段与随后一次 FIFO 脉冲均符合预期，捕获窗口中无 `debug_error` 或 `fifo_overflow`。[原始 CSV 与汇总](evidence/can_board_matrix_20261001_verified/summary.csv)、[测试清单](evidence/can_board_matrix_20261001_verified/manifest.json)和[构建来源](evidence/can_board_matrix_20261001_verified/provenance.json)已归档。清单分别记录构建时 HEAD `ec86271`、捕获时 HEAD `c7ee5a5`、bitstream/探针及来源记录哈希；来源记录逐文件列出哈希，避免把捕获时的源码版本误当成 bitstream 来源。
+
+CANable 固件版本 `2022 0726` 对 `C/S6/A0/M0/O` 不返回逐条成功确认。脚本在每条配置命令后查询 `V` 并等待版本响应，确认解析器按顺序处理命令；若收到 BEL、异常响应或超时就中止。`V` 响应不能独立证明前一条命令被接受，关闭自动重发仍依据[该版本固件的 SLCAN 命令实现](https://github.com/normaldotcom/canable2-fw/blob/main/src/slcan.c)和[CAN 初始化实现](https://github.com/normaldotcom/canable2-fw/blob/main/src/can.c)。1024 样本的短窗口也无法排除窗口外重发。
 
 ## 边界与后续
 
