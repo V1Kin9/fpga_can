@@ -115,6 +115,8 @@ function Send-OneShot([string]$command) {
             $null = Wait-FirmwareBarrier $port $setup
         }
         $reply = Wait-FirmwareBarrier $port $command
+        # Keep the channel open while the controller transmits the queued frame.
+        Start-Sleep -Milliseconds 300
         return ($reply -replace "`r", '<CR>' -replace "`n", '<LF>')
     } finally {
         if ($port.IsOpen) {
