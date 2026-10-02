@@ -23,12 +23,17 @@ function Hex-Value([string]$Value) {
 }
 
 function Get-HighBit($Samples, [int]$Index) {
+    $lastMatch = $null
     foreach ($row in $Samples) {
         if ($row.debug_mdc -eq '1' -and $row.debug_mdio_busy -eq '1' -and
             (Hex-Value $row.'debug_mdio_bit_index[6:0]') -eq $Index) {
-            return $row.debug_mdio_in
+            $lastMatch = $row
+        } elseif ($null -ne $lastMatch) {
+            break
         }
     }
+    # Match the RTL's falling-edge sample without crossing into a later read.
+    if ($null -ne $lastMatch) { return $lastMatch.debug_mdio_in }
     throw "Missing MDC-high bit $Index in raw ETH1 MDIO capture"
 }
 
