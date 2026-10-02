@@ -1,6 +1,6 @@
 # FCAN UDP 载荷协议
 
-本文定义 FPGA 与主机之间的 FCAN UDP **载荷**格式。集成顶层默认发送 v2，`FCAN_PROTOCOL_VERSION=1` 可保留既有 v1 发送格式；主机解码器和 SocketCAN bridge 同时接收 v1/v2。板级 RGMII 和 RTL8211E 尚未实现。
+本文定义 FPGA 与主机之间的 FCAN UDP **载荷**格式。集成顶层默认发送 v2，`FCAN_PROTOCOL_VERSION=1` 可保留既有 v1 发送格式；主机解码器和 SocketCAN bridge 同时接收 v1/v2。板级 RGMII 数据发送尚未实现；RTL8211E 有独立的 PHY/MDIO 探测顶层。
 
 所有多字节整数均采用网络字节序（大端）。CAN 的 DATA0 是总线上的第一个数据字节。
 

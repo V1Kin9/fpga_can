@@ -1,11 +1,11 @@
 # Kintex-7 被动 CAN 接收与 GMII 发送链
 
-本工程面向 Kintex-7 `XC7K325T-2FFG676C`，实现 Classical CAN 2.0A/2.0B 被动接收、FCAN UDP 封装及 GMII 发送。CAN 速率可在 125/250/500/1000 kbit/s 间用 `CAN_BITRATE` 参数选择，默认 500 kbit/s，采样点维持 80%。集成顶层默认发送 FCAN v2，主机仍支持 v1。CAN TXD 恒为隐性电平；RTL 不生成 ACK、主动 CAN 帧或错误帧。2026-10-01 已在实体板卡完成 CAN-only、500 kbit/s 的七种单次帧定向实测；GMII 后的 RGMII/PHY 和 Linux 实包链路仍未上板贯通。
+本工程面向 Kintex-7 `XC7K325T-2FFG676C`，实现 Classical CAN 2.0A/2.0B 被动接收、FCAN UDP 封装及 GMII 发送。CAN 速率可在 125/250/500/1000 kbit/s 间用 `CAN_BITRATE` 参数选择，默认 500 kbit/s，采样点维持 80%。集成顶层默认发送 FCAN v2，主机仍支持 v1。CAN TXD 恒为隐性电平；RTL 不生成 ACK、主动 CAN 帧或错误帧。2026-10-01 已在实体板卡完成 CAN-only、500 kbit/s 的七种单次帧定向实测；2026-10-02 已用独立 ETH1 PHY 探测顶层读到实板 RTL8211E 身份寄存器；2026-10-03 ETH1 与软路由协商出 1000 Mb/s 全双工物理链路。RGMII 数据和 Linux 实包链路仍待验证。
 
 ```text
 CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/IPv4/Ethernet II
               → 50/125 MHz 帧 CDC → Ethernet MAC TX → GMII
-              → [板级 RGMII / RTL8211E / RJ45：尚未实现]
+              → [ETH1 PHY/MDIO 探测：独立顶层；RGMII 数据/UDP 实包：尚未实现]
 
 主机收到 FCAN UDP → Linux SocketCAN bridge → vcan0 → candump/cansniffer
                    ↘ PCAPNG / candump compact log 离线抓包
@@ -25,14 +25,15 @@ CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/I
 | 路径 | 内容 |
 | --- | --- |
 | `rtl/`、`tb/` | CAN 接收、封装、CDC、MAC TX RTL，以及分层和完整端到端仿真 |
-| `constraints/` | CAN-only 板级约束和独立 GMII 无板双时钟约束 |
-| `scripts/` | Vivado 2020.1 仿真、综合、CAN-only ILA 实现脚本 |
+| `constraints/` | CAN-only、ETH1 PHY 探测板级约束和独立 GMII 无板双时钟约束 |
+| `scripts/` | Vivado 2020.1 仿真、综合、CAN-only 与 ETH1 PHY ILA 实现脚本 |
 | `host/` | FCAN v1/v2 解码器、Linux SocketCAN bridge、PCAPNG/compact log 抓包及单元测试 |
 | [CAN 接收设计](docs/can_rx_design.md) | 协议、位时序、复位和安全接线 |
 | [CAN-only 上板记录](docs/can_board_bringup.md) | 2026-10-01 桌面隔离总线七种单次帧与验证边界 |
 | [FCAN 载荷协议](docs/can_udp_protocol.md) | 数据报和记录的字节格式 |
 | [诊断与抓包](docs/diagnostics.md) | 错误/状态计数、CDC、时间戳及离线格式 |
 | [Ethernet/IPv4/UDP 封装](docs/ethernet_udp_frame.md) | 网络头部、默认地址及握手 |
+| [ETH1 PHY 最小上板验证](docs/eth1_phy_bringup.md) | 125 MHz、复位、MDIO 扫描与链路寄存器判读 |
 | [MAC TX 与帧 CDC](docs/mac_tx_cdc.md) | 跨时钟握手、FCS、IFG、GMII |
 | [CAN-only ILA 实现记录](docs/ila_impl_result.md) | 历史实现结果及适用范围 |
 
@@ -109,4 +110,4 @@ candump vcan0
 
 ## 当前不包含
 
-工程不包含 CAN FD、CAN 主动发送、Ethernet RX、ARP、DHCP、RGMII DDR、125 MHz 板级时钟实现、RTL8211E 复位/MDIO 或实体引脚与源同步约束。这些工作须在拿到板卡并核对 PHY、电源、时钟和布线后开展。
+工程不包含 CAN FD、CAN 主动发送、Ethernet RX、ARP、DHCP、可发送数据的 RGMII DDR 适配层，以及其源同步 I/O 时序约束。ETH1 PHY 探测顶层已有独立的 125 MHz、复位、MDIO 和空闲 TXC 实现；这不构成实体 UDP 链路验证。

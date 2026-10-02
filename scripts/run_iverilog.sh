@@ -30,6 +30,7 @@ tops=(
   tb_can_reset_midframe
   tb_can_random_waveforms
   tb_mac_idle_reset
+  tb_eth1_phy_probe
 )
 
 for top in "${tops[@]}"; do

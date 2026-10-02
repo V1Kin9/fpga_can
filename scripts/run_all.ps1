@@ -28,6 +28,7 @@ $tops = @(
     "tb_can_reset_midframe",
     "tb_can_random_waveforms",
     "tb_mac_idle_reset",
+    "tb_eth1_phy_probe",
     "tb_can_bitrate_125000",
     "tb_can_bitrate_250000",
     "tb_can_bitrate_500000",

@@ -20,3 +20,6 @@ jobs:
         run: bash scripts/run_iverilog.sh
       - name: Run host FCAN decoder and SocketCAN bridge tests
         run: python -m unittest discover -s host -p 'test_*.py' -v
+      - name: Run ETH1 capture checker regressions
+        shell: pwsh
+        run: ./scripts/test_eth1_phy_capture.ps1

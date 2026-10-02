@@ -10,7 +10,7 @@
 目的 MAC → 源 MAC → EtherType 0x0800 → IPv4 头 → UDP 头 → FCAN 载荷
 ```
 
-本层不生成前导码、SFD、最小帧填充、以太网 FCS 或帧间间隔；这些由 `ethernet_mac_tx` 完成。RGMII DDR、PHY 复位和 MDIO 仍属于后续板级工作。最小 FCAN 数据报包含 1 条 24 字节记录，形成 68 字节 IPv4 数据报和 82 字节 MAC 客户端帧，因此当前正常流量不需要以太网最小帧填充；MAC 仍具备填充能力。
+本层不生成前导码、SFD、最小帧填充、以太网 FCS 或帧间间隔；这些由 `ethernet_mac_tx` 完成。RGMII 数据 DDR 适配仍属于后续板级工作；独立 ETH1 探测顶层已有 PHY 复位和 MDIO。最小 FCAN 数据报包含 1 条 24 字节记录，形成 68 字节 IPv4 数据报和 82 字节 MAC 客户端帧，因此当前正常流量不需要以太网最小帧填充；MAC 仍具备填充能力。
 
 ## 默认网络参数
 

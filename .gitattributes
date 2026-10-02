@@ -1,0 +1,7 @@
+rtl/reset_sync.v text eol=lf
+rtl/mdio_clause22_reader.v text eol=lf
+rtl/eth1_phy_probe_core.v text eol=lf
+rtl/eth1_phy_probe_top.v text eol=lf
+constraints/kintex7_base_eth1_phy.xdc text eol=lf
+scripts/impl_eth1_phy.tcl text eol=lf
+scripts/run_impl_eth1_phy.ps1 text eol=lf
