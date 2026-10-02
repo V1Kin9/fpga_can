@@ -43,6 +43,13 @@ if ((Hex-Value $status.'debug_found_mask[31:0]') -ne 2 -or
     $status.debug_mmcm_locked -ne '1' -or $status.debug_phy_rstn -ne '1') {
     throw "ETH1 PHY identity/reset mismatch: mask=$($status.'debug_found_mask[31:0]') addr=$($status.'debug_found_addr[4:0]') ID=$($status.'debug_phy_id1[15:0]'):$($status.'debug_phy_id2[15:0]')"
 }
+foreach ($register in @('bmcr', 'bmsr', 'physr')) {
+    $column = "debug_${register}[15:0]"
+    $value = Hex-Value $status.$column
+    if ($value -eq 0xffff -or ($register -eq 'bmsr' -and $value -eq 0)) {
+        throw "ETH1 $($register.ToUpperInvariant()) status read is invalid: $($status.$column)"
+    }
+}
 if (@($statusRows | Select-Object -ExpandProperty debug_clk125_toggle -Unique).Count -ne 2) {
     throw 'ETH1 125 MHz heartbeat did not toggle in the ILA window'
 }
