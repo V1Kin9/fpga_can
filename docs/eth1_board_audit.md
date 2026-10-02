@@ -26,7 +26,7 @@
 | `rgmii_rxc` / `rgmii_rx_ctl` | AB2 / AF4 | 输入，`LVCMOS18` |
 | `rgmii_rxd[0:3]` | AF3 / AC3 / AE2 / AE1 | 输入，`LVCMOS18` |
 
-原理图第 10 页的 `X2` 是 PHY 自带的 25 MHz 晶体，`CLK125` 脚未连接到 FPGA。1000M RGMII 发送时钟仍须由 FPGA 提供；计划从已用于 CAN 的 50 MHz 板载时钟经 MMCM 生成 125 MHz，并以 MMCM `LOCKED` 控制数据通路复位。PHY 的 `PHYRSTB` 为低有效，手册要求低电平至少 10 ms；下载后由 FPGA 主动保持复位并计时释放，不能只依赖板上上拉电阻。
+原理图第 10 页的 `X2` 是 PHY 自带的 25 MHz 晶体，`CLK125` 脚未连接到 FPGA。1000M RGMII 发送时钟仍须由 FPGA 提供；计划从已用于 CAN 的 50 MHz 板载时钟经 MMCM 生成 125 MHz，并以 MMCM `LOCKED` 控制数据通路复位。PHY 的 `PHYRSTB` 为低有效，RTL8211E 手册 §7.16 要求低电平至少 10 ms，释放后还须等待至少 30 ms 才能首次访问 MDIO 寄存器；下载后由 FPGA 主动保持复位并完成两段计时，不能只依赖板上上拉电阻。
 
 ## PHY 配置脚与时钟延时
 
@@ -46,7 +46,7 @@
 
 ## 最小上板验证次序
 
-1. **PHY/时钟检查 bitstream**：只启用 ETH1，50 MHz→125 MHz MMCM，PHY 低有效复位保持至少 10 ms。扫描 MDIO 地址并读取 PHY ID、链路状态和协商速率；预期地址 1，实际读回为准。用电脑网口连接 J1，确认 1000 Mb/s 链路。此阶段不接 CAN 数据流。
+1. **PHY/时钟检查 bitstream**：只启用 ETH1，50 MHz→125 MHz MMCM，PHY 低有效复位保持至少 10 ms；释放后等待至少 30 ms，再开始 MDIO 扫描并读取 PHY ID、链路状态和协商速率。预期地址 1，实际读回为准。用电脑网口连接 J1，确认 1000 Mb/s 链路。此阶段不接 CAN 数据流。
 2. **单向已知帧**：把现有 GMII MAC 输出接到独立的 GMII→RGMII DDR 发送适配层，先周期发送固定 UDP 测试帧。在电脑抓包核对目标 MAC/IP、UDP 长度与载荷、FCS 错误计数，并检查完整实现报告。现有默认目的 MAC `02:00:00:00:00:02` 未必是电脑网卡地址，测试前应显式配置。
 3. **CAN→UDP 集成**：最小以太网帧确认后接入 `can_gmii_pipeline_top`，为其 32 位 `session_id` 确定板上生成方式，再对照 CAN 发端、FPGA 诊断和 Linux SocketCAN bridge。连续 CAN 流仍需第二个能够 ACK 的节点。
 
