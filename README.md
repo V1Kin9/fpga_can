@@ -36,6 +36,7 @@ CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/I
 | [ETH1 PHY 最小上板验证](docs/eth1_phy_bringup.md) | 125 MHz、复位、MDIO 扫描与链路寄存器判读 |
 | [MAC TX 与帧 CDC](docs/mac_tx_cdc.md) | 跨时钟握手、FCS、IFG、GMII |
 | [CAN-only ILA 实现记录](docs/ila_impl_result.md) | 历史实现结果及适用范围 |
+| [ETH1 板级接口核对](docs/eth1_board_audit.md) | RTL8211E 原理图、引脚、延时配置与最小上板验证次序 |
 
 ## 运行验证
 
