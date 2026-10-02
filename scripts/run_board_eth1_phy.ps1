@@ -45,7 +45,8 @@ try {
     Copy-Item -LiteralPath @($bitstream,$probes,$provenancePath,$captureTcl) -Destination $work
     Push-Location $work
     try {
-        & (Join-Path $VivadoBin 'vivado.bat') -mode batch -nolog -nojournal -source (Join-Path $work 'board_eth1_phy_capture.tcl') -tclargs $work 2>&1 |
+        $workTcl = $work.Replace('\', '/')
+        & (Join-Path $VivadoBin 'vivado.bat') -mode batch -nolog -nojournal -source (Join-Path $work 'board_eth1_phy_capture.tcl') -tclargs $workTcl 2>&1 |
             Tee-Object -FilePath 'board_console.log'
         if ($LASTEXITCODE -ne 0 -or
             -not (Select-String -LiteralPath 'board_console.log' -Pattern 'ETH1_PHY_BOARD_CAPTURE_PASS' -Quiet)) {

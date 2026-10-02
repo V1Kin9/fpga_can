@@ -26,13 +26,17 @@
 
 无网线也应读到 PHY ID。预期 `found_mask=0x00000002`、`found_addr=1`、`PHYID1=0x001c`；手册给出的 RTL8211E model/revision 对应 `PHYID2=0xc915`，实物修订位可不同。`debug_clk125_toggle` 在 50 MHz ILA 窗口内应反复翻转。
 
-把 J1 接到电脑千兆网口或千兆交换机后，再看链路状态：BMSR bit 2 为 link、bit 5 为自动协商完成；PHYSR（寄存器 17）bit 10 为实时 link、bit 11 为速率/双工已解析、bit 13 为全双工、bits 15:14 中 `10` 为 1000 Mb/s、`01` 为 100 Mb/s、`00` 为 10 Mb/s。两端读数应与电脑网卡报告的速率相符。仅有网口 LED 亮起不足以证明 UDP 发送。
+把 J1 接到电脑千兆网口、千兆交换机或软路由网口后，再看链路状态：BMSR bit 2 为 link、bit 5 为自动协商完成；PHYSR（寄存器 17）bit 10 为实时 link、bit 11 为速率/双工已解析、bit 13 为全双工、bits 15:14 中 `10` 为 1000 Mb/s、`01` 为 100 Mb/s、`00` 为 10 Mb/s。两端读数应与对端网口报告的速率相符。仅有网口 LED 亮起不足以证明 UDP 发送。
 
 ## 2026-10-02 实板结果
 
 在 `50a6768` 源码构建的 bitstream 上，Windows Vivado 2020.1 对 JTAG 设备 `xc7k325t` 下载成功。XSim `tb_eth1_phy_probe` 通过；布线后 WNS 为 +2.647 ns、WHS 为 +0.050 ns，四项总线偏斜约束均满足，DRC 为 0 错误、1 项 ILA/debug hub 内部 `RTSTAT-10` 警告。
 
-ILA 快照显示 `found_mask=0x00000002`、地址 1、`PHYID1=0x001c`、`PHYID2=0xc915`、`BMCR=0x1140`、`BMSR=0x7949`、`PHYSR=0x4040`，MMCM 已锁定且 PHY 复位已释放。原始 MDIO 波形独立解码的 PHYID1 也为 `0x001c`。本次快照的 `link_up=0`、自动协商未完成；链路协商仍需在 J1 连上千兆网口或交换机后复测。本地原始捕获位于 `build/board_test/eth1_phy_20261002_011213/`，构建溯源文件记录 bitstream 与探针哈希。
+ILA 快照显示 `found_mask=0x00000002`、地址 1、`PHYID1=0x001c`、`PHYID2=0xc915`、`BMCR=0x1140`、`BMSR=0x7949`、`PHYSR=0x4040`，MMCM 已锁定且 PHY 复位已释放。原始 MDIO 波形独立解码的 PHYID1 也为 `0x001c`。当时尚未接入以太网对端，快照的 `link_up=0`、自动协商未完成。本地原始捕获位于 `build/board_test/eth1_phy_20261002_011213/`，构建溯源文件记录 bitstream 与探针哈希。
+
+## 2026-10-03 实板链路结果
+
+J1 接入 GL-MT3000 软路由的 `eth1` 网口后，使用同一溯源 bitstream 重新经 JTAG 下载并采集 ILA。自动校验通过：PHY 地址 1、`PHYID1=0x001c`、`PHYID2=0xc915`、`BMCR=0x1140`、`BMSR=0x796d`、`PHYSR=0xad02`、`link_up=1`、`autoneg_complete=1`。PHYSR 表示 1000 Mb/s 全双工、速率/双工已解析。软路由 `ethtool eth1` 同时报告 `Link detected: yes`、`Speed: 1000Mb/s`、`Duplex: Full`。本地捕获位于 `build/board_test/eth1_phy_20261003_000221/`。这次验证覆盖物理链路协商；探测顶层仍未发送以太网帧。
 
 ## 验证边界
 

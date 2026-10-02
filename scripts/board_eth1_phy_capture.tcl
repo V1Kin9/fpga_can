@@ -1,6 +1,7 @@
 # JTAG-program and capture two periodic ETH1 PHY status snapshots.
 if {[llength $argv] != 1} { error "usage: board_eth1_phy_capture.tcl <ASCII-work-dir>" }
-set work [file normalize [lindex $argv 0]]
+# Keep the caller's absolute slash path; Vivado 2020.1 can mis-normalize AppData.
+set work [lindex $argv 0]
 set bitfile [file join $work eth1_phy.bit]
 set ltxfile [file join $work eth1_phy.ltx]
 if {![file isfile $bitfile] || ![file isfile $ltxfile]} {

@@ -1,6 +1,6 @@
 # Kintex-7 被动 CAN 接收与 GMII 发送链
 
-本工程面向 Kintex-7 `XC7K325T-2FFG676C`，实现 Classical CAN 2.0A/2.0B 被动接收、FCAN UDP 封装及 GMII 发送。CAN 速率可在 125/250/500/1000 kbit/s 间用 `CAN_BITRATE` 参数选择，默认 500 kbit/s，采样点维持 80%。集成顶层默认发送 FCAN v2，主机仍支持 v1。CAN TXD 恒为隐性电平；RTL 不生成 ACK、主动 CAN 帧或错误帧。2026-10-01 已在实体板卡完成 CAN-only、500 kbit/s 的七种单次帧定向实测；2026-10-02 已用独立 ETH1 PHY 探测顶层读到实板 RTL8211E 身份寄存器。ETH1 链路协商、RGMII 数据和 Linux 实包链路仍待验证。
+本工程面向 Kintex-7 `XC7K325T-2FFG676C`，实现 Classical CAN 2.0A/2.0B 被动接收、FCAN UDP 封装及 GMII 发送。CAN 速率可在 125/250/500/1000 kbit/s 间用 `CAN_BITRATE` 参数选择，默认 500 kbit/s，采样点维持 80%。集成顶层默认发送 FCAN v2，主机仍支持 v1。CAN TXD 恒为隐性电平；RTL 不生成 ACK、主动 CAN 帧或错误帧。2026-10-01 已在实体板卡完成 CAN-only、500 kbit/s 的七种单次帧定向实测；2026-10-02 已用独立 ETH1 PHY 探测顶层读到实板 RTL8211E 身份寄存器；2026-10-03 ETH1 与软路由协商出 1000 Mb/s 全双工物理链路。RGMII 数据和 Linux 实包链路仍待验证。
 
 ```text
 CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/IPv4/Ethernet II
