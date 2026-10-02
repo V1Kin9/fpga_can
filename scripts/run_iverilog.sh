@@ -31,6 +31,7 @@ tops=(
   tb_can_random_waveforms
   tb_mac_idle_reset
   tb_eth1_phy_probe
+  tb_eth1_fixed_udp_sender
 )
 
 for top in "${tops[@]}"; do

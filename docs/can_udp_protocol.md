@@ -1,6 +1,6 @@
 # FCAN UDP 载荷协议
 
-本文定义 FPGA 与主机之间的 FCAN UDP **载荷**格式。集成顶层默认发送 v2，`FCAN_PROTOCOL_VERSION=1` 可保留既有 v1 发送格式；主机解码器和 SocketCAN bridge 同时接收 v1/v2。板级 RGMII 数据发送尚未实现；RTL8211E 有独立的 PHY/MDIO 探测顶层。
+本文定义 FPGA 与主机之间的 FCAN UDP **载荷**格式。集成顶层默认发送 v2，`FCAN_PROTOCOL_VERSION=1` 可保留既有 v1 发送格式；主机解码器和 SocketCAN bridge 同时接收 v1/v2。ETH1 板级 RGMII 单向发送已实现并通过固定 UDP 实包测试；FCAN 实包测试见 [ETH1 UDP 上板记录](eth1_udp_board_bringup.md)。
 
 所有多字节整数均采用网络字节序（大端）。CAN 的 DATA0 是总线上的第一个数据字节。
 
@@ -113,4 +113,4 @@ python3 host/can_udp_decode.py --bind 0.0.0.0 --port 5000
 
 ## 验证边界
 
-CI 覆盖队列顺序/反压、打包、字段编码、主机解码、SocketCAN 转换及完整 CAN 波形→GMII 仿真；Vivado 综合和 CDC/DRC 报告由本地脚本生成。CAN-only 500 kbit/s 标准单帧已有 [首次板级证据](can_board_bringup.md)。实际 RGMII、PHY、以太网线缆、车辆总线和主机实包尚未验证，见 [无板验证记录](pre_board_verification.md)。
+CI 覆盖队列顺序/反压、打包、字段编码、主机解码、SocketCAN 转换及完整 CAN 波形→GMII 仿真；Vivado 综合和 CDC/DRC 报告由本地脚本生成。CAN-only 500 kbit/s 单帧已通过 [板级实测](can_board_bringup.md)。ETH1 固定 UDP 与集成顶层的 FCAN 状态包已通过物理抓包，但当前无 ACK 的桌面总线没有形成有效 CAN_FRAME，见 [上板记录](eth1_udp_board_bringup.md)；车辆总线、持续无错 CAN 和 Linux SocketCAN 的实体链路尚未验证。[无板验证记录](pre_board_verification.md)保留之前阶段的快照，不代表当前板级进度。

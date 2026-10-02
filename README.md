@@ -1,11 +1,11 @@
-# Kintex-7 被动 CAN 接收与 GMII 发送链
+# Kintex-7 被动 CAN 接收与 ETH1 RGMII 发送链
 
-本工程面向 Kintex-7 `XC7K325T-2FFG676C`，实现 Classical CAN 2.0A/2.0B 被动接收、FCAN UDP 封装及 GMII 发送。CAN 速率可在 125/250/500/1000 kbit/s 间用 `CAN_BITRATE` 参数选择，默认 500 kbit/s，采样点维持 80%。集成顶层默认发送 FCAN v2，主机仍支持 v1。CAN TXD 恒为隐性电平；RTL 不生成 ACK、主动 CAN 帧或错误帧。2026-10-01 已在实体板卡完成 CAN-only、500 kbit/s 的七种单次帧定向实测；2026-10-02 已用独立 ETH1 PHY 探测顶层读到实板 RTL8211E 身份寄存器；2026-10-03 ETH1 与软路由协商出 1000 Mb/s 全双工物理链路。RGMII 数据和 Linux 实包链路仍待验证。
+本工程面向 Kintex-7 `XC7K325T-2FFG676C`，实现 Classical CAN 2.0A/2.0B 被动接收、FCAN UDP 封装及 ETH1 单向发送。CAN 速率可在 125/250/500/1000 kbit/s 间用 `CAN_BITRATE` 参数选择，默认 500 kbit/s，采样点维持 80%。集成顶层默认发送 FCAN v2，主机仍支持 v1。CAN TXD 恒为隐性电平；RTL 不生成 ACK、主动 CAN 帧或错误帧。2026-10-01 已在实体板卡完成 CAN-only、500 kbit/s 的七种单次帧定向实测；2026-10-02 已读回 ETH1 RTL8211E 身份寄存器；2026-10-03 ETH1 与软路由协商出 1000 Mb/s 全双工链路，固定 UDP 测试帧和集成顶层的 FCAN 状态包均已实抓。当前桌面总线没有第二个 ACK 节点，CANable 单次发送在 ACK delimiter 处触发 form error，本轮尚未收到 CAN→UDP 成功帧；原始证据见 [ETH1 UDP 上板记录](docs/eth1_udp_board_bringup.md)。
 
 ```text
 CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/IPv4/Ethernet II
               → 50/125 MHz 帧 CDC → Ethernet MAC TX → GMII
-              → [ETH1 PHY/MDIO 探测：独立顶层；RGMII 数据/UDP 实包：尚未实现]
+              → GMII→RGMII DDR TX → ETH1 RTL8211E → 路由器（固定 UDP、FCAN 状态已实测）
 
 主机收到 FCAN UDP → Linux SocketCAN bridge → vcan0 → candump/cansniffer
                    ↘ PCAPNG / candump compact log 离线抓包
@@ -17,16 +17,17 @@ CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/I
 - 主机单元测试覆盖双版本解码、session 切换、类型记录、SocketCAN 16 字节转换、PCAPNG 与 compact log 的字节布局；无需真实 vcan。Linux 可选 `scripts/test_vcan_integration.sh` 会在缺少权限时清楚跳过。
 - Vivado 2020.1 综合、时序、DRC 和 CDC 报告由 `run_gmii_synth.ps1` 生成。未指定的板级引脚使 DRC 保留告警；综合结果不代表板级时序签核。
 - CAN-only ILA bitstream 已在隔离桌面总线上通过七种 500 kbit/s 单次帧：标准 DLC 0/1/8、位填充数据、扩展数据、标准 RTR 与扩展 RTR。PR #8 review 修复后的重建与复测将构建源码哈希绑定到 bitstream，CRC、`frame_valid` 和 FIFO 均通过，原始捕获与验证边界见 [上板记录](docs/can_board_bringup.md)。持续流、多速率和原始 DLC 9～15 尚未实测。
+- ETH1 固定 UDP 顶层已经通过 1 Gb/s RGMII 双边沿仿真、Vivado 布线时序/DRC；最终源码重新实现后在 GL-MT3000 的 `eth1` 实抓 10 个连续序号包，平均间隔 99.951 ms，接收 FCS 错误计数为 0。集成顶层另实抓到 FCAN 状态包；由于当前 CAN 总线没有 ACK 节点，尚无有效 CAN_FRAME。原始 pcap 与时序模型边界见 [ETH1 UDP 上板记录](docs/eth1_udp_board_bringup.md)。
 
-无板阶段的仿真、综合证据和剩余 GMII 板级工作见 [无板验证记录](docs/pre_board_verification.md)。
+早期无板阶段的仿真、综合证据见 [无板验证记录](docs/pre_board_verification.md)。
 
 ## 目录与文档
 
 | 路径 | 内容 |
 | --- | --- |
 | `rtl/`、`tb/` | CAN 接收、封装、CDC、MAC TX RTL，以及分层和完整端到端仿真 |
-| `constraints/` | CAN-only、ETH1 PHY 探测板级约束和独立 GMII 无板双时钟约束 |
-| `scripts/` | Vivado 2020.1 仿真、综合、CAN-only 与 ETH1 PHY ILA 实现脚本 |
+| `constraints/` | CAN-only、ETH1 PHY 与活动 RGMII 板级约束，以及 GMII 无板双时钟约束 |
+| `scripts/` | Vivado 2020.1 仿真、综合、CAN-only ILA、ETH1 实现与上板验证脚本 |
 | `host/` | FCAN v1/v2 解码器、Linux SocketCAN bridge、PCAPNG/compact log 抓包及单元测试 |
 | [CAN 接收设计](docs/can_rx_design.md) | 协议、位时序、复位和安全接线 |
 | [CAN-only 上板记录](docs/can_board_bringup.md) | 2026-10-01 桌面隔离总线七种单次帧与验证边界 |
@@ -34,6 +35,7 @@ CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/I
 | [诊断与抓包](docs/diagnostics.md) | 错误/状态计数、CDC、时间戳及离线格式 |
 | [Ethernet/IPv4/UDP 封装](docs/ethernet_udp_frame.md) | 网络头部、默认地址及握手 |
 | [ETH1 PHY 最小上板验证](docs/eth1_phy_bringup.md) | 125 MHz、复位、MDIO 扫描与链路寄存器判读 |
+| [ETH1 UDP 上板记录](docs/eth1_udp_board_bringup.md) | 固定 UDP 物理抓包、CAN→UDP 测试和时序边界 |
 | [MAC TX 与帧 CDC](docs/mac_tx_cdc.md) | 跨时钟握手、FCS、IFG、GMII |
 | [CAN-only ILA 实现记录](docs/ila_impl_result.md) | 历史实现结果及适用范围 |
 | [ETH1 板级接口核对](docs/eth1_board_audit.md) | RTL8211E 原理图、引脚、延时配置与最小上板验证次序 |
@@ -111,4 +113,4 @@ candump vcan0
 
 ## 当前不包含
 
-工程不包含 CAN FD、CAN 主动发送、Ethernet RX、ARP、DHCP、可发送数据的 RGMII DDR 适配层，以及其源同步 I/O 时序约束。ETH1 PHY 探测顶层已有独立的 125 MHz、复位、MDIO 和空闲 TXC 实现；这不构成实体 UDP 链路验证。
+工程不包含 CAN FD、CAN 主动发送、Ethernet RX、ARP 或 DHCP。ETH1 当前仅支持 1000 Mb/s 全双工单向发送，MAC/IP 地址和 FCAN board-test session ID 均固定；实际板级走线偏差和 PHY TXC 延迟容差仍需测量，不能把当前 STA 模型视为最终硬件签核。

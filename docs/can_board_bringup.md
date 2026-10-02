@@ -52,4 +52,8 @@ CANable 固件版本 `2022 0726` 对 `C/S6/A0/M0/O` 不返回逐条成功确认�
 
 已覆盖上述七种单次帧，尚未在实体总线上覆盖原始 DLC 9～15、125/250/1000 kbit/s、连续帧或长时间误码。当前 CANable 串口固件的 [SLCAN 实现](https://github.com/normaldotcom/canable2-fw/blob/main/src/slcan.c)限制 DLC 不超过 8，无法用它直接发出原始 DLC 9～15。FPGA 被动监听不发 ACK；parser 的 ACK slot 接受任一总线值，因此 `frame_valid` 不能证明发送端获得 ACK。当前仅一块主动 CAN 控制器，持续无错误发送还需要第二个能够 ACK 的节点。收发器芯片表面丝印尚未读清，终端阻值及 3.3 V 电压也未用仪表复测。测试结论不适用于车辆总线。
 
-下一步在隔离桌面总线加第二个能够 ACK 的 CAN 控制器，进行连续帧、丢帧统计和多速率实测，并用可用的万用表确认终端电阻。随后再进行 GMII→RGMII/RTL8211E 板级引脚、时钟与时序约束工作。实体以太网链路及 FCAN UDP→Linux bridge 尚未验证。
+当时的后续计划是在隔离桌面总线增加第二个能够 ACK 的 CAN 控制器，进行连续帧、丢帧统计和多速率实测，并用可用的万用表确认终端电阻。此处 ETH1 相关边界只描述 2026-10-01 的状态；2026-10-03 的更新见下节。
+
+## 2026-10-03 复测补充
+
+ETH1 RGMII 与固定 UDP 已经实测，详见[新上板记录](eth1_udp_board_bringup.md)。但在当前桌面接线上，重新下载上述匹配的 CAN-only ILA 配置并单发 `t1231A5`，未再次得到 `frame_valid`。改以 `debug_error` 触发，观察到 ACK slot 为隐性而 ACK delimiter 为显性，parser 报 form error。集成 ETH1 顶层的路由器抓包也只有状态及 form-error 记录，没有 CAN_FRAME。2026-10-01 的七种帧 PASS 是当时的真实短窗口捕获；它们不保证当前无 ACK 的桌面总线每次都能形成完整帧。后续实帧复测需要增加第二个正常模式、能够 ACK 的 CAN 节点，并保持 FPGA 的物理被动监听。
