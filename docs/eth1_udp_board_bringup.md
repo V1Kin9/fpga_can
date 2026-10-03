@@ -82,6 +82,33 @@ python3 scripts/check_eth1_pcap.py fcan docs/evidence/eth1_udp_20261003/can_250k
 
 对照结束后重新从同一干净源码 HEAD 构建并下载 500 kbit/s 集成顶层，bitstream SHA-256 为 `318ae10482f51230f005b80105ca62aefda259eef49576449714019a373922c6`；布线 WNS `+0.282 ns`、WHS `+0.086 ns`、DRC 0。JTAG 显示配置完成，软路由 `eth1` 随后连续收到两个每秒一次的 UDP 状态包，抓包内核丢包 0。测试结束时 FPGA 已恢复 500 kbit/s 配置。
 
+## 500 kbit/s 上电初始状态复测
+
+用户将 CANable USB 拔下并重新插入，Windows 重新出现 COM7；FPGA 保持上述 500 kbit/s bitstream。再次以 `S6/A0/M0/O` 配置 CANable，单次打开串口发送 24 次标准帧 `t1231A5`。路由器[原始抓包](evidence/eth1_udp_20261003/can_500k_cold_burst24.pcap)含 49 个序号 877～925 连续的 FCAN v2 UDP 包：25 个状态、**先后 16 个 `CAN_ERROR code=3`、随后 8 个 `CAN_FRAME`**。全部 8 帧为 ID `0x123`、DLC 1、DATA `A5`、`CRC_OK=True`；末条状态为 `rx_frames_total=8`、`form_errors=16`、CRC/填充错误及队列丢弃为 0。路由器内核抓包丢包 0。PCAP SHA-256 为 `c579991ed0872a7b9c01bd51cdf5eeb5ce2a85696f428291f056c16231866aaf`。
+
+```sh
+python3 scripts/check_eth1_pcap.py fcan docs/evidence/eth1_udp_20261003/can_500k_cold_burst24.pcap --can-id 0x123 --data a5
+```
+
+复测重现了未断电前 500 kbit/s 24 次发送得到 16 条格式错误和 8 条完整帧的顺序；它支持缺少 ACK 后发送控制器错误状态变化的解释，但仍没有直接读到 CANable 的发送错误计数，不能把该状态变化当作实测事实。冷启动 250 kbit/s 比较必须再次给 CANable 断电复位后进行。当前 FPGA 仍运行 500 kbit/s 配置。
+
+## 250 kbit/s 上电初始状态对照
+
+用户再次拔下、重新插入 CANable USB，Windows 重新出现 COM7。FPGA 下载前述已通过时序/DRC、哈希匹配的 250 kbit/s bitstream；CANable 使用 `S5/A0/M0/O`，在同一隔离总线上单次打开串口发送 24 次 `t1231A5`。路由器[原始抓包](evidence/eth1_udp_20261003/can_250k_cold_burst24.pcap)包含 49 个序号 31～79 连续的 FCAN v2 UDP 包：25 个状态、**先后 16 个 `CAN_ERROR code=3`、随后 8 个 `CAN_FRAME`**。8 帧全部为 ID `0x123`、DLC 1、DATA `A5`、`CRC_OK=True`；末条状态的 `rx_frames_total=8`、`form_errors=16`，CRC/填充错误及队列丢弃均为 0。路由器内核抓包丢包 0。PCAP SHA-256 为 `140009ec21f6f3bbb4269fb6f8f66349a4a9ab7cbe8a54a90a1d577fd1a7c8cd`。
+
+```sh
+python3 scripts/check_eth1_pcap.py fcan docs/evidence/eth1_udp_20261003/can_250k_cold_burst24.pcap --can-id 0x123 --data a5
+```
+
+| CANable 重新插入后的速率 | 单发命令 | 抓包中格式错误 | 随后的 CRC 正确帧 |
+| --- | ---: | ---: | ---: |
+| 500 kbit/s | 24 | 16 | 8 |
+| 250 kbit/s | 24 | 16 | 8 |
+
+两个上电初始状态试验的事件顺序相同；**本测试没有发现把 CAN 速率从 500 降到 250 kbit/s 能消除这 16 次初始格式错误**。先前未给 CANable 断电的 250 kbit/s 24/24 接收结果，不能归因于降速；它与发送器错误状态延续的解释相符。仍未直接读到发送错误计数或 ACK，因此不能把解释当成已证明的内部状态。下一步应在隔离总线上增加一个速率匹配、正常模式且能够 ACK 的节点，验证无初始错误和发送端确认成功。
+
+对照后再次下载哈希匹配的 500 kbit/s bitstream，JTAG 配置成功；软路由连续收到两个每秒一次的 UDP 状态包，内核丢包 0。最终 FPGA 保持 500 kbit/s 集成配置。
+
 ## 复现入口
 
 Windows Vivado 2020.1 在本机默认 `AppData` 临时路径下会丢失路径组件；把工作区内的 `build/vivado_stage` 临时映射为未占用的 ASCII 盘符后运行：
