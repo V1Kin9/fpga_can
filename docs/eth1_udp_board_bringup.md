@@ -62,6 +62,24 @@ python3 scripts/check_eth1_pcap.py fcan docs/evidence/eth1_udp_20261003/can_no_a
 
 因此当前 FPGA **CAN 接收→FCAN 封装→ETH1 UDP→路由器抓包** 的实帧路径已经验证。错误记录先出现 16 次、随后出现完整帧，与发送控制器经历 ACK 错误后进入错误被动状态的解释一致：错误被动节点的隐性错误标志可使旁路监听器观察到完整帧。**没有直接读取 CANable 的发送错误计数或状态，不能断言状态切换已被证明；也不能据此声称 CANable 成功发送、获得 ACK。**这与 2026-10-01 CAN-only 七种帧 PASS 并不矛盾，旧 ILA 结果仍证明当时 FPGA 的接收、CRC 和 FIFO 路径完成单帧验证。若要稳定复测并确认发送端也认可该帧，需要在桌面总线上增加一台 500 kbit/s 正常模式、能够 ACK 的控制器；FPGA 继续物理被动监听，新增节点不要使总线出现第三个 120 Ω 终端。
 
+## 250 kbit/s 对照：CANable 未断电复位
+
+使用 `synth_design -generic CAN_BITRATE=250000` 构建同一集成顶层，来源 HEAD 为 `0c6a651`，构建时源码树干净。250 kbit/s bitstream SHA-256 为 `24c528886a6b6d4b5db89aa58ca59c4f7dffdcb592ae2a8049662640e036bac7`；布线 WNS `+0.282 ns`、WHS `+0.055 ns`，DRC 0。Vivado XSim 的 `tb_can_bitrate_250000` 通过；JTAG 下载成功。CANable 从上一轮 500 kbit/s 试验后一直供电，重新打开 COM7 并用 `S5/A0/M0/O` 配置 250 kbit/s，随后发送 24 次 `t1231A5`。
+
+路由器[原始抓包](evidence/eth1_udp_20261003/can_250k_warm_burst24.pcap)有 51 个序号连续的 FCAN v2 UDP 包：27 个状态、24 个 CAN_FRAME、0 个 CAN_ERROR。全部 24 帧均为标准 ID `0x123`、DLC 1、DATA `A5`、`CRC_OK=True`；末条状态计数为 `rx_frames_total=24`、CRC/填充/格式错误及队列丢弃均为 0。路由器报告 0 个内核抓包丢包；PCAP SHA-256 为 `30a174acb2cf42d8417b1fcaf1c24119b7f756d4c204cfd3190227a0888f4311`。
+
+```powershell
+.\scripts\run_impl_eth1_udp.ps1 -Top eth1_can_udp_top -CanBitrate 250000 -WorkRoot 'X:\'
+.\scripts\run_board_eth1_udp.ps1 -Top eth1_can_udp_top -CanBitrate 250000 -WorkRoot 'X:\'
+.\scripts\send_canable_once.ps1 -CanBitrate 250000 -Count 24 -FrameCommand 't1231A5'
+```
+
+```sh
+python3 scripts/check_eth1_pcap.py fcan docs/evidence/eth1_udp_20261003/can_250k_warm_burst24.pcap --can-id 0x123 --data a5
+```
+
+**不能把 500 kbit/s 的 8/24 与这里的 24/24 当成速率导致的可靠率改善。**在两轮之间 CANable 未断电复位，缺少 ACK 时的发送错误状态可能延续；本次没有测量 CANable 的发送错误计数，也没有第二个 ACK 节点。需要从明确的上电初始状态重测，才能比较初始错误行为；要验证稳定、发送端确认的通信仍需第二个正常模式 CAN 节点。
+
 ## 复现入口
 
 Windows Vivado 2020.1 在本机默认 `AppData` 临时路径下会丢失路径组件；把工作区内的 `build/vivado_stage` 临时映射为未占用的 ASCII 盘符后运行：
