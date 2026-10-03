@@ -8,7 +8,17 @@ if {[llength $rtl_sources] == 0} { error "No staged ETH1 RTL sources" }
 foreach source $rtl_sources { read_verilog $source }
 read_xdc kintex7_base_eth1_udp.xdc
 if {$top eq "eth1_can_udp_top"} { read_xdc kintex7_base_eth1_can_udp.xdc }
-synth_design -top $top -part xc7k325tffg676-2
+if {$top eq "eth1_can_udp_top"} {
+    if {![info exists ::env(FPGA_CAN_BITRATE)] ||
+        $::env(FPGA_CAN_BITRATE) ni {250000 500000}} {
+        error "ETH1 CAN bitrate must be 250000 or 500000"
+    }
+    puts "ETH1_CAN_BITRATE=$::env(FPGA_CAN_BITRATE)"
+    synth_design -top $top -part xc7k325tffg676-2 \
+        -generic CAN_BITRATE=$::env(FPGA_CAN_BITRATE)
+} else {
+    synth_design -top $top -part xc7k325tffg676-2
+}
 if {$top eq "eth1_can_udp_top"} {
     # The bundled frame data and length are stable from req_toggle until ACK.
     # Bound propagation to 8 ns (less than two 125 MHz synchronizer cycles)

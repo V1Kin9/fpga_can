@@ -1,6 +1,7 @@
 param(
     [string]$PortName = 'COM7',
     [ValidateRange(1,64)][int]$Count = 3,
+    [ValidateSet(250000,500000)][int]$CanBitrate = 500000,
     [string]$FrameCommand = 't1231A5'
 )
 
@@ -37,7 +38,8 @@ try {
     $port.Open()
     Start-Sleep -Milliseconds 100
     Wait-FirmwareBarrier $port ''
-    foreach ($setup in @('C', 'S6', 'A0', 'M0', 'O')) {
+    $rateCommand = if ($CanBitrate -eq 250000) { 'S5' } else { 'S6' }
+    foreach ($setup in @('C', $rateCommand, 'A0', 'M0', 'O')) {
         Wait-FirmwareBarrier $port $setup
     }
     for ($i = 0; $i -lt $Count; $i++) {
@@ -45,7 +47,7 @@ try {
         Start-Sleep -Milliseconds 300
     }
     # The firmware's V barrier confirms command parsing, not CAN bus ACK.
-    Write-Host "CANABLE_COMMAND_SENT $Count $FrameCommand $PortName"
+    Write-Host "CANABLE_COMMAND_SENT $Count $FrameCommand $PortName bitrate=$CanBitrate"
 } finally {
     if ($port.IsOpen) {
         $port.Write("C`r")

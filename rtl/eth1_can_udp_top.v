@@ -2,7 +2,9 @@
 
 // Board-test top: passive CAN RX on D13 to FCAN v2 UDP on ETH1/J1.
 // Uses fixed, bench-only L2/L3 addresses and a fixed session marker.
-module eth1_can_udp_top (
+module eth1_can_udp_top #(
+    parameter integer CAN_BITRATE = 500000
+) (
     input  wire       clk_50m,
     input  wire       rst_n,
     input  wire       can_rx,
@@ -55,6 +57,7 @@ module eth1_can_udp_top (
     end
 
     can_gmii_pipeline_top #(
+        .CAN_BITRATE(CAN_BITRATE),
         .SRC_MAC(48'h020000000001),
         .DST_MAC(48'h9483c42aeb74),
         .SRC_IP(32'hc0a808fa),

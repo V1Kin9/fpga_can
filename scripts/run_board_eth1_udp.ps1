@@ -1,13 +1,20 @@
 param(
     [ValidateSet('eth1_fixed_udp_top','eth1_can_udp_top')]
     [string]$Top = 'eth1_fixed_udp_top',
+    [ValidateSet(250000,500000)][int]$CanBitrate = 500000,
     [string]$VivadoBin = 'C:\Xilinx\Vivado\2020.1\bin',
     [string]$WorkRoot = $env:TEMP
 )
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$implDir = Join-Path $root ("build\${Top}_impl")
+if ($Top -ne 'eth1_can_udp_top' -and $CanBitrate -ne 500000) {
+    throw 'CanBitrate applies only to eth1_can_udp_top'
+}
+$implName = if ($Top -eq 'eth1_can_udp_top' -and $CanBitrate -ne 500000) {
+    "${Top}_${CanBitrate}_impl"
+} else { "${Top}_impl" }
+$implDir = Join-Path $root ("build\$implName")
 $provenancePath = Join-Path $implDir 'provenance.json'
 if (-not (Test-Path -LiteralPath $provenancePath)) { throw 'ETH1 UDP provenance missing; rebuild bitstream' }
 $provenance = Get-Content -LiteralPath $provenancePath -Raw | ConvertFrom-Json
@@ -15,6 +22,9 @@ if ($provenance.SchemaVersion -ne 1 -or $provenance.Top -ne $Top -or
     $provenance.Part -ne 'xc7k325tffg676-2' -or
     -not $provenance.SourceFilesSha256) {
     throw 'ETH1 UDP bitstream provenance is incomplete'
+}
+if ($Top -eq 'eth1_can_udp_top' -and $provenance.CanBitrate -ne $CanBitrate) {
+    throw "ETH1 CAN bitstream bitrate mismatch: expected $CanBitrate"
 }
 foreach ($property in $provenance.SourceFilesSha256.PSObject.Properties) {
     $path = Join-Path $root ($property.Name -replace '/', '\')
@@ -48,7 +58,7 @@ try {
         throw 'ETH1 UDP JTAG programming failed; see program_console.log'
     }
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-    $output = Join-Path $root "build\board_test\${Top}_$stamp"
+    $output = Join-Path $root "build\board_test\${implName}_$stamp"
     New-Item -ItemType Directory -Path $output -Force | Out-Null
     Copy-Item -LiteralPath 'program_console.log','provenance.json' -Destination $output
     Write-Host "ETH1_UDP_JTAG_PROGRAM_PASS; log: $output"

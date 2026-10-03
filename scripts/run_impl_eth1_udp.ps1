@@ -3,11 +3,15 @@ param(
     [string]$WorkRoot = $env:TEMP,
     [ValidateSet('eth1_fixed_udp_top','eth1_can_udp_top')]
     [string]$Top = 'eth1_fixed_udp_top',
+    [ValidateSet(250000,500000)][int]$CanBitrate = 500000,
     [switch]$KeepArtifacts
 )
 
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+if ($Top -ne 'eth1_can_udp_top' -and $CanBitrate -ne 500000) {
+    throw 'CanBitrate applies only to eth1_can_udp_top'
+}
 $workRootPath = (New-Item -ItemType Directory -Path $WorkRoot -Force).FullName
 $work = Join-Path $workRootPath ("fpga_can_eth1_udp_" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $work | Out-Null
@@ -38,9 +42,11 @@ try {
     Push-Location $work
     try {
         $env:FPGA_CAN_TOP = $Top
+        $env:FPGA_CAN_BITRATE = [string]$CanBitrate
         & (Join-Path $VivadoBin 'vivado.bat') -mode batch -source (Join-Path $work 'impl_eth1_udp.tcl') -nolog -nojournal 2>&1 |
             Tee-Object -FilePath 'impl_console.log'
         Remove-Item Env:FPGA_CAN_TOP
+        Remove-Item Env:FPGA_CAN_BITRATE
         if ($LASTEXITCODE -ne 0) { throw 'Vivado ETH1 implementation failed' }
         if (-not (Select-String -LiteralPath 'impl_console.log' -Pattern 'ETH1_UDP_IMPL_PASS' -Quiet)) {
             throw 'Vivado did not reach the completion marker'
@@ -70,11 +76,15 @@ try {
             SourceFilesSha256 = $hashes
             Part = 'xc7k325tffg676-2'
             Top = $Top
+            CanBitrate = $CanBitrate
             BitstreamSha256 = (Get-FileHash -LiteralPath 'eth1_udp.bit' -Algorithm SHA256).Hash
             BuildUtc = [DateTime]::UtcNow.ToString('o')
         }
         $provenance | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath 'provenance.json' -Encoding UTF8
-        $output = Join-Path $root ("build\${Top}_impl")
+        $implName = if ($Top -eq 'eth1_can_udp_top' -and $CanBitrate -ne 500000) {
+            "${Top}_${CanBitrate}_impl"
+        } else { "${Top}_impl" }
+        $output = Join-Path $root ("build\$implName")
         New-Item -ItemType Directory -Force -Path $output | Out-Null
         Copy-Item -Path '*.rpt','*.bit','*.dcp' -Destination $output
         Copy-Item -LiteralPath 'impl_console.log','provenance.json' -Destination $output
