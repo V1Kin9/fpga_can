@@ -1,6 +1,6 @@
 # Kintex BaseC ETH1 板级接口核对
 
-本记录核对了随板资料中的原理图、RTL8211E 手册和示例约束，作为 CAN→UDP 上板实现的输入。2026-10-02 的[独立 ETH1 PHY/MDIO 探测（PR #10）](https://github.com/V1Kin9/fpga_can/pull/10)已下载实板 bitstream 并读回 PHY 寄存器；本审计的 RGMII 数据路径及时序结论仍是设计输入，J1 链路协商、RGMII 数据传输和 UDP 实包尚未验证。
+本记录核对了随板资料中的原理图、RTL8211E 手册和示例约束，作为 CAN→UDP 上板实现的输入。2026-10-02 的[独立 ETH1 PHY/MDIO 探测（PR #10）](https://github.com/V1Kin9/fpga_can/pull/10)已下载实板 bitstream 并读回 PHY 寄存器；2026-10-03 J1 与软路由完成千兆全双工协商，并通过固定 UDP 物理抓包，见 [ETH1 UDP 上板记录](eth1_udp_board_bringup.md)。本审计的 PCB 走线偏差和 TXC 延迟容差仍未实测。
 
 ## 资料与选用接口
 
@@ -42,12 +42,12 @@
 
 **TXC 只做同相转发。** RGMII 发送数据和 TXC 均应经 FPGA IOB 的 DDR 输出寄存器，数据上升沿发送低半字节、下降沿发送高半字节；`TX_CTL` 上升沿发送 `TX_EN`、下降沿发送 `TX_EN XOR TX_ER`。由于板上 `TXDLY=1`，不要再给 FPGA 的 TXC 加 90° 相移；否则可能叠加两次约 2 ns 的偏移。[AMD 的 7 系列 RGMII 指南](https://docs.amd.com/r/en-US/pg051-tri-mode-eth-mac/Transmitter-Logic-for-7-Series-Using-HR-I/O)给出了在**PHY 不提供延时**时由 FPGA 引入约 2 ns 的另一方案，本板须按已确认的 PHY 配置选择其一。
 
-示例 `eth1_loopback.xdc` 只提供引脚、电平和几个输入时钟，并没有本工程完整的 TX 源同步输出延时约束。正式实现须根据 PHY 手册的 RGMII 建立/保持时间、板级走线偏差和实际输出时钟建立约束，检查布线后的 setup/hold、DRC、`check_timing` 与未约束路径。手册第 74 页给出的内部延时模式下建立/保持时间最小值为 1.2 ns；本资料包尚未发现 ETH1 的 PCB 走线长度/偏差数据，因此不能仅凭示例 XDC 宣称 I/O 时序通过。
+示例 `eth1_loopback.xdc` 只提供引脚、电平和几个输入时钟，没有活动 TX 数据的源同步输出延时约束。本工程的 `kintex7_base_eth1_udp.xdc` 已按 PHY 内部 TXC 名义延时 2.0 ns、手册内部延时模式下最小建立/保持时间 1.2 ns、假定每边 0.2 ns 板级偏差建立模型，完成布线后 setup/hold、DRC 和 `check_timing` 检查。本资料包尚未发现 ETH1 的 PCB 走线长度/偏差数据，也未实测 PHY 延迟容差，因此这些正时序余量只适用于当前模型，不能宣称最终板级时序签核。
 
 ## 最小上板验证次序
 
-1. **PHY/时钟检查 bitstream（部分完成）**：独立 ETH1 PHY 探测顶层已在实板确认 MMCM 锁定、PHY 地址 1、PHY ID `001c:c915`、BMCR `1140`、BMSR `7949`；当前 `link_up=0`。PHY 低有效复位须保持至少 10 ms，释放后等待至少 30 ms 才开始 MDIO 访问。仍需用电脑千兆网口或交换机连接 J1，确认链路协商、速率与双工。此阶段不接 CAN 数据流。
-2. **单向已知帧**：把现有 GMII MAC 输出接到独立的 GMII→RGMII DDR 发送适配层，先周期发送固定 UDP 测试帧。在电脑抓包核对目标 MAC/IP、UDP 长度与载荷、FCS 错误计数，并检查完整实现报告。现有默认目的 MAC `02:00:00:00:00:02` 未必是电脑网卡地址，测试前应显式配置。
-3. **CAN→UDP 集成**：最小以太网帧确认后接入 `can_gmii_pipeline_top`，为其 32 位 `session_id` 确定板上生成方式，再对照 CAN 发端、FPGA 诊断和 Linux SocketCAN bridge。连续 CAN 流仍需第二个能够 ACK 的节点。
+1. **PHY/时钟检查（已完成）**：独立 ETH1 PHY 探测顶层已在实板确认 MMCM 锁定、PHY 地址 1、PHY ID `001c:c915`、BMCR `1140`、BMSR `7949`；当时未接线所以 `link_up=0`。随后接入软路由 J1，确认千兆全双工链路。PHY 低有效复位保持至少 10 ms，释放后等待至少 30 ms 才开始 MDIO 访问。
+2. **单向已知帧（已完成）**：已把 GMII MAC 接到 GMII→RGMII DDR 发送适配层，并周期发送固定 UDP 测试帧。在软路由核对目标 MAC/IP、UDP 长度、载荷与接收 FCS 错误计数；测试目的 MAC 设为软路由实测地址，完整结果见 [上板记录](eth1_udp_board_bringup.md)。
+3. **CAN→UDP 集成**：已接入 `can_gmii_pipeline_top`，用固定 `session_id=0x20261003` 完成桌面台架状态包和 8 个 CRC 正确的 CAN_FRAME 抓取。当前没有第二个 ACK 节点，不能确认发送端成功；生产环境还需生成跨重启唯一的 session ID，并用实体 CAN 帧对照 CAN 发端及 Linux SocketCAN bridge。
 
-10/100 Mb/s 的 RGMII 时钟分别不同于 125 MHz；计划中的首个发包测试 bitstream 只面向 **1000 Mb/s**，不把低速链路亮灯视为 UDP 路径通过。2026-10-02 的 PHY 探测已有实板 MDIO 读回与独立探测顶层实现报告（详见 [PR #10](https://github.com/V1Kin9/fpga_can/pull/10) 的 `docs/eth1_phy_bringup.md`）；J1 链路协商、活动 RGMII 数据的源同步时序、主机抓包及 UDP/CAN→UDP 实包仍待完成。
+10/100 Mb/s 的 RGMII 时钟分别不同于 125 MHz；当前发包 bitstream 只面向 **1000 Mb/s**，不把低速链路亮灯视为 UDP 路径通过。PHY 探测已有实板 MDIO 读回与独立探测顶层实现报告（详见 [PR #10](https://github.com/V1Kin9/fpga_can/pull/10) 的 `docs/eth1_phy_bringup.md`）。固定 UDP 实包与源同步 STA 模型已验证；CAN→UDP、PCB skew 和 PHY 延迟容差的硬件边界见 [后续上板记录](eth1_udp_board_bringup.md)。

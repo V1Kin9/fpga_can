@@ -14,7 +14,7 @@ CAN RX → 帧队列 → FCAN 打包 → Ethernet II/IPv4/UDP 帧构建
 125 MHz GMII 域               ethernet_mac_tx
                               GMII TXD[7:0] / TX_EN / TX_ER
                                         ↓
-                              [板级 RGMII 数据：尚未实现；PHY 探测独立进行]
+                              GMII→RGMII DDR TX → ETH1 PHY（板级独立顶层）
 ```
 
 ## 完整帧 CDC 缓冲
@@ -42,6 +42,6 @@ CRC 使用反射多项式 `0xEDB88320`，初始值 `0xFFFFFFFF`，最终取反�
 
 ## GMII 接口与后续板级工作
 
-顶层输入为 `gmii_clk_125m`，输出为 `gmii_txd[7:0]`、`gmii_tx_en` 和 `gmii_tx_er`。此便携式顶层仍需外部 125 MHz 时钟。独立的 [ETH1 PHY 探测顶层](eth1_phy_bringup.md)已从板载 50 MHz 生成 125 MHz，不能直接视为 CAN→GMII 与 PHY 已集成。
+便携式顶层输入为 `gmii_clk_125m`，输出为 `gmii_txd[7:0]`、`gmii_tx_en` 和 `gmii_tx_er`，仍需外部 125 MHz 时钟。板级 `eth1_can_udp_top` 将它接入 `eth1_board_support` 的 MMCM/PHY/MDIO 与 RGMII TX；`eth1_fixed_udp_top` 单独验证同一物理发送层。
 
-下一阶段在已核对的 ETH1 引脚与 PHY 延时配置基础上，加入 GMII→RGMII DDR 数据层和源同步时序约束，完成布局布线、CDC/DRC/STA 和 PC 端抓包。当前便携式顶层的仿真、综合及主机桥接不等同于物理 Ethernet 实包验证。
+`eth1_can_udp_top` 的帧内存和长度使用已有 req/ack 双翻转握手，发送前稳定、应答前不覆盖；板级 Vivado 实现对这些跨域数据到 125 MHz 寄存器施加 8 ns datapath-only 上限，保留其余时序检查。实际 ETH1 固定 UDP 抓包、源同步时序模型及 CAN→UDP 测试边界见 [上板记录](eth1_udp_board_bringup.md)。便携式顶层的仿真和主机桥接测试本身不构成实体链路验证。
