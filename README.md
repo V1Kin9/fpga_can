@@ -1,6 +1,6 @@
 # Kintex-7 被动 CAN 接收与 ETH1 RGMII 发送链
 
-本工程面向 Kintex-7 `XC7K325T-2FFG676C`，实现 Classical CAN 2.0A/2.0B 被动接收、FCAN UDP 封装及 ETH1 单向发送。CAN 速率可在 125/250/500/1000 kbit/s 间用 `CAN_BITRATE` 参数选择，默认 500 kbit/s，采样点维持 80%。集成顶层默认发送 FCAN v2，主机仍支持 v1。CAN TXD 恒为隐性电平；RTL 不生成 ACK、主动 CAN 帧或错误帧。2026-10-01 已在实体板卡完成 CAN-only、500 kbit/s 的七种单次帧定向实测；2026-10-02 已读回 ETH1 RTL8211E 身份寄存器；2026-10-03 ETH1 与软路由协商出 1000 Mb/s 全双工链路，固定 UDP 测试帧和集成顶层的 FCAN 状态包均已实抓。当前桌面总线没有第二个 ACK 节点，CANable 单次发送在 ACK delimiter 处触发 form error，本轮尚未收到 CAN→UDP 成功帧；原始证据见 [ETH1 UDP 上板记录](docs/eth1_udp_board_bringup.md)。
+本工程面向 Kintex-7 `XC7K325T-2FFG676C`，实现 Classical CAN 2.0A/2.0B 被动接收、FCAN UDP 封装及 ETH1 单向发送。CAN 速率可在 125/250/500/1000 kbit/s 间用 `CAN_BITRATE` 参数选择，默认 500 kbit/s，采样点维持 80%。集成顶层默认发送 FCAN v2，主机仍支持 v1。CAN TXD 恒为隐性电平；RTL 不生成 ACK、主动 CAN 帧或错误帧。2026-10-01 已在实体板卡完成 CAN-only、500 kbit/s 的七种单次帧定向实测；2026-10-02 已读回 ETH1 RTL8211E 身份寄存器；2026-10-03 ETH1 与软路由协商出 1000 Mb/s 全双工链路，固定 UDP 测试帧和集成顶层的 FCAN 状态包均已实抓。随后在没有第二个 ACK 节点的桌面总线上连续单发 24 帧，路由器抓到先后 16 个 form error 与 8 个 CRC 正确的 CAN_FRAME，完成 CAN→ETH 实帧路径验证；这不证明 CANable 获得 ACK。原始证据见 [ETH1 UDP 上板记录](docs/eth1_udp_board_bringup.md)。
 
 ```text
 CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/IPv4/Ethernet II
@@ -17,7 +17,7 @@ CAN 收发器 RXD → CAN RX/Parser → 帧队列 → FCAN v2 + 诊断 → UDP/I
 - 主机单元测试覆盖双版本解码、session 切换、类型记录、SocketCAN 16 字节转换、PCAPNG 与 compact log 的字节布局；无需真实 vcan。Linux 可选 `scripts/test_vcan_integration.sh` 会在缺少权限时清楚跳过。
 - Vivado 2020.1 综合、时序、DRC 和 CDC 报告由 `run_gmii_synth.ps1` 生成。未指定的板级引脚使 DRC 保留告警；综合结果不代表板级时序签核。
 - CAN-only ILA bitstream 已在隔离桌面总线上通过七种 500 kbit/s 单次帧：标准 DLC 0/1/8、位填充数据、扩展数据、标准 RTR 与扩展 RTR。PR #8 review 修复后的重建与复测将构建源码哈希绑定到 bitstream，CRC、`frame_valid` 和 FIFO 均通过，原始捕获与验证边界见 [上板记录](docs/can_board_bringup.md)。持续流、多速率和原始 DLC 9～15 尚未实测。
-- ETH1 固定 UDP 顶层已经通过 1 Gb/s RGMII 双边沿仿真、Vivado 布线时序/DRC；最终源码重新实现后在 GL-MT3000 的 `eth1` 实抓 10 个连续序号包，平均间隔 99.951 ms，接收 FCS 错误计数为 0。集成顶层另实抓到 FCAN 状态包；由于当前 CAN 总线没有 ACK 节点，尚无有效 CAN_FRAME。原始 pcap 与时序模型边界见 [ETH1 UDP 上板记录](docs/eth1_udp_board_bringup.md)。
+- ETH1 固定 UDP 顶层已经通过 1 Gb/s RGMII 双边沿仿真、Vivado 布线时序/DRC；最终源码重新实现后在 GL-MT3000 的 `eth1` 实抓 10 个连续序号包，平均间隔 99.951 ms，接收 FCS 错误计数为 0。集成顶层实抓到 FCAN 状态包和 8 个 CRC 正确的 `0x123/A5` CAN_FRAME。当前没有第二个 ACK 节点，不能据此认定发送端成功；原始 pcap 与时序模型边界见 [ETH1 UDP 上板记录](docs/eth1_udp_board_bringup.md)。
 
 早期无板阶段的仿真、综合证据见 [无板验证记录](docs/pre_board_verification.md)。
 

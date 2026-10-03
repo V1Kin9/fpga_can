@@ -1,6 +1,6 @@
 param(
     [string]$PortName = 'COM7',
-    [ValidateRange(1,16)][int]$Count = 3,
+    [ValidateRange(1,64)][int]$Count = 3,
     [string]$FrameCommand = 't1231A5'
 )
 

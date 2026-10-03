@@ -38,7 +38,7 @@ Vivado 2020.1 对集成顶层完成布线与 bitstream：WNS `+0.282 ns`、WHS `
 
 完成 CAN-only ILA 诊断后已重新下载这份集成 bitstream；最终[三包状态抓包](evidence/eth1_udp_20261003/fcan_status_final.pcap)经独立校验器通过，末条 `rx_frames_total=0`、`form_errors=0`、`queue_drops=0`，说明重配置后状态计数重新开始。该抓包 SHA-256 为 `22a005743accf619f58329684724c55017e097475704983ab6def6d2422e62bd`。测试结束时 FPGA 保持集成配置。
 
-但本轮 **没有得到 CAN→UDP 成功帧**。在同一隔离总线上，用 CANable COM7 固件 `2022 0726` 配置 `S6/A0/M0/O`，分别发送三次 `t1231A5`（500 kbit/s、标准 ID `0x123`、DLC 1、数据 `A5`）。路由器[原始抓包](evidence/eth1_udp_20261003/can_no_ack.pcap)含 25 个 FCAN 数据报：22 个状态、3 个 `CAN_ERROR code=3`、0 个 `CAN_FRAME`；末条状态的 `rx_frames_total=0`、`form_errors=6`。抓包 SHA-256 为 `44b16579a23224483ed9f9446aa0a739c0634bf97ad6f001b913274ef768e653`。该状态计数包含抓包开始前的尝试，因此不应把 6 次 form error 都归于这三次发送。复核命令预期返回 `[FAIL] expected CAN frame is absent`：
+首次短测 **没有得到 CAN→UDP 成功帧**。在同一隔离总线上，用 CANable COM7 固件 `2022 0726` 配置 `S6/A0/M0/O`，分别发送三次 `t1231A5`（500 kbit/s、标准 ID `0x123`、DLC 1、数据 `A5`）。路由器[原始抓包](evidence/eth1_udp_20261003/can_no_ack.pcap)含 25 个 FCAN 数据报：22 个状态、3 个 `CAN_ERROR code=3`、0 个 `CAN_FRAME`；末条状态的 `rx_frames_total=0`、`form_errors=6`。抓包 SHA-256 为 `44b16579a23224483ed9f9446aa0a739c0634bf97ad6f001b913274ef768e653`。该状态计数包含抓包开始前的尝试，因此不应把 6 次 form error 都归于这三次发送。复核命令预期返回 `[FAIL] expected CAN frame is absent`：
 
 ```sh
 python3 scripts/check_eth1_pcap.py fcan docs/evidence/eth1_udp_20261003/can_no_ack.pcap --can-id 0x123 --data a5
@@ -46,7 +46,21 @@ python3 scripts/check_eth1_pcap.py fcan docs/evidence/eth1_udp_20261003/can_no_a
 
 为区分集成 RTL 与物理总线问题，重新下载 2026-10-01 七种帧测试用、bitstream/探针哈希匹配的 CAN-only ILA 配置；其 CAN 接收 RTL 文件哈希仍与当前源码一致。在相同接线下再次发送一帧，ILA 没有触发 `frame_valid`。改为 `debug_error` 触发后的[原始 1024 样本 CSV](evidence/eth1_udp_20261003/can_ack_delimiter_error.csv)显示：CRC delimiter 样本 310 为 `1`，ACK slot 样本 410 为 `1`（没有节点 ACK），ACK delimiter 样本 510 为 `0`；样本 512 的 `debug_error_code=0x03`，parser 正处于恢复状态。CSV SHA-256 为 `47df71ab5b1b2e17cc259cc7c5d459fc3291cafdb1fd5995598e36bba0f66165`。CANable 固件的 `V` 命令只证明命令解析顺序，**不证明物理发送成功或获得 ACK**。
 
-这些位值与“总线没有第二个 ACK 节点，发送控制器检测到 ACK 错误并发出主动错误标志”相符；仅凭现有波形不能排除另一个同时发生的总线错误。[Bosch CAN 2.0 规范](https://tech-tools.com/files/can2spec.pdf)规定 ACK delimiter 为隐性，当前 parser 报 form error 是正确行为，不能为使测试变绿而接受这帧。FPGA 继续保持被动监听，B14 不参与 ACK。若要完成真正的 CAN→UDP 实帧测试，需要在桌面总线上增加一台设为 500 kbit/s 正常模式、能够 ACK 的 CAN 控制器，然后重复此抓包及预期 ID/数据检查。新增节点不应在已经由两端提供终端电阻的总线上再启用第三个 120 Ω 终端。
+这些位值与“总线没有第二个 ACK 节点，发送控制器检测到 ACK 错误并发出主动错误标志”相符；仅凭现有波形不能排除另一个同时发生的总线错误。[Bosch CAN 2.0 规范](https://tech-tools.com/files/can2spec.pdf)规定 ACK delimiter 为隐性，错误主动节点会发送显性错误标志，而错误被动节点只能发送隐性错误标志。当前 parser 报 form error 是正确行为，不能为使测试变绿而接受这帧。FPGA 继续保持被动监听，B14 不参与 ACK。
+
+随后保持集成 bitstream 和同一桌面接线，单次打开 COM7，关闭自动重发并连续发送 24 次 `t1231A5`：
+
+```powershell
+.\scripts\send_canable_once.ps1 -Count 24 -FrameCommand 't1231A5'
+```
+
+路由器[原始抓包](evidence/eth1_udp_20261003/can_no_ack_burst24.pcap)含 45 个 FCAN v2 UDP 数据报：21 个 `DEVICE_STATUS`、先后 16 个 `CAN_ERROR code=3`、随后 8 个 `CAN_FRAME`。8 帧全部为标准 ID `0x123`、DLC 1、DATA `A5`、`CRC_OK=True`；按抓包顺序，首个成功帧紧随第 16 个 form error。状态每秒发送一次；最后一条状态在最后三帧之前，因此其 `rx_frames_total=5` 与抓包中的 8 个帧事件不矛盾。路由器报告 0 个内核抓包丢包。PCAP SHA-256 为 `fd600cc1342492641813ef8b53fadf22f650f60c269c661e318f37745ed15d63`。复核命令实际返回 `[PASS]`：
+
+```sh
+python3 scripts/check_eth1_pcap.py fcan docs/evidence/eth1_udp_20261003/can_no_ack_burst24.pcap --can-id 0x123 --data a5
+```
+
+因此当前 FPGA **CAN 接收→FCAN 封装→ETH1 UDP→路由器抓包** 的实帧路径已经验证。错误记录先出现 16 次、随后出现完整帧，与发送控制器经历 ACK 错误后进入错误被动状态的解释一致：错误被动节点的隐性错误标志可使旁路监听器观察到完整帧。**没有直接读取 CANable 的发送错误计数或状态，不能断言状态切换已被证明；也不能据此声称 CANable 成功发送、获得 ACK。**这与 2026-10-01 CAN-only 七种帧 PASS 并不矛盾，旧 ILA 结果仍证明当时 FPGA 的接收、CRC 和 FIFO 路径完成单帧验证。若要稳定复测并确认发送端也认可该帧，需要在桌面总线上增加一台 500 kbit/s 正常模式、能够 ACK 的控制器；FPGA 继续物理被动监听，新增节点不要使总线出现第三个 120 Ω 终端。
 
 ## 复现入口
 

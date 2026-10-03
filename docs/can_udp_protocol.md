@@ -113,4 +113,4 @@ python3 host/can_udp_decode.py --bind 0.0.0.0 --port 5000
 
 ## 验证边界
 
-CI 覆盖队列顺序/反压、打包、字段编码、主机解码、SocketCAN 转换及完整 CAN 波形→GMII 仿真；Vivado 综合和 CDC/DRC 报告由本地脚本生成。CAN-only 500 kbit/s 单帧已通过 [板级实测](can_board_bringup.md)。ETH1 固定 UDP 与集成顶层的 FCAN 状态包已通过物理抓包，但当前无 ACK 的桌面总线没有形成有效 CAN_FRAME，见 [上板记录](eth1_udp_board_bringup.md)；车辆总线、持续无错 CAN 和 Linux SocketCAN 的实体链路尚未验证。[无板验证记录](pre_board_verification.md)保留之前阶段的快照，不代表当前板级进度。
+CI 覆盖队列顺序/反压、打包、字段编码、主机解码、SocketCAN 转换及完整 CAN 波形→GMII 仿真；Vivado 综合和 CDC/DRC 报告由本地脚本生成。CAN-only 500 kbit/s 单帧已通过 [板级实测](can_board_bringup.md)。ETH1 固定 UDP、集成顶层的 FCAN 状态包和 8 个 CRC 正确的 CAN_FRAME 已通过物理抓包，见 [上板记录](eth1_udp_board_bringup.md)。当前无第二个 ACK 节点，发送端成功确认、车辆总线、持续无错 CAN 和 Linux SocketCAN 的实体链路尚未验证。[无板验证记录](pre_board_verification.md)保留之前阶段的快照，不代表当前板级进度。
