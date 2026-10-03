@@ -80,6 +80,8 @@ python3 scripts/check_eth1_pcap.py fcan docs/evidence/eth1_udp_20261003/can_250k
 
 **不能把 500 kbit/s 的 8/24 与这里的 24/24 当成速率导致的可靠率改善。**在两轮之间 CANable 未断电复位，缺少 ACK 时的发送错误状态可能延续；本次没有测量 CANable 的发送错误计数，也没有第二个 ACK 节点。需要从明确的上电初始状态重测，才能比较初始错误行为；要验证稳定、发送端确认的通信仍需第二个正常模式 CAN 节点。
 
+对照结束后重新从同一干净源码 HEAD 构建并下载 500 kbit/s 集成顶层，bitstream SHA-256 为 `318ae10482f51230f005b80105ca62aefda259eef49576449714019a373922c6`；布线 WNS `+0.282 ns`、WHS `+0.086 ns`、DRC 0。JTAG 显示配置完成，软路由 `eth1` 随后连续收到两个每秒一次的 UDP 状态包，抓包内核丢包 0。测试结束时 FPGA 已恢复 500 kbit/s 配置。
+
 ## 复现入口
 
 Windows Vivado 2020.1 在本机默认 `AppData` 临时路径下会丢失路径组件；把工作区内的 `build/vivado_stage` 临时映射为未占用的 ASCII 盘符后运行：
