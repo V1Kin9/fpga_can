@@ -44,7 +44,7 @@ Vivado 2020.1 对集成顶层完成布线与 bitstream：WNS `+0.282 ns`、WHS `
 python3 scripts/check_eth1_pcap.py fcan docs/evidence/eth1_udp_20261003/can_no_ack.pcap --can-id 0x123 --data a5
 ```
 
-为区分集成 RTL 与物理总线问题，重新下载 2026-10-01 七种帧测试用、bitstream/探针哈希匹配的 CAN-only ILA 配置；其 CAN 接收 RTL 文件哈希仍与当前源码一致。在相同接线下再次发送一帧，ILA 没有触发 `frame_valid`。改为 `debug_error` 触发后的[原始 1024 样本 CSV](evidence/eth1_udp_20261003/can_ack_delimiter_error.csv)显示：CRC delimiter 样本 310 为 `1`，ACK slot 样本 410 为 `1`（没有节点 ACK），ACK delimiter 样本 510 为 `0`；样本 512 的 `debug_error_code=0x03`，parser 正处于恢复状态。CSV SHA-256 为 `47df71ab5b1b2e17cc259cc7c5d459fc3291cafdb1fd5995598e36bba0f66165`。CANable 固件的 `V` 命令只证明命令解析顺序，**不证明物理发送成功或获得 ACK**。
+为区分集成 RTL 与物理总线问题，重新下载 2026-10-01 七种帧测试用、bitstream/探针哈希匹配的 CAN-only ILA 配置；其 CAN 接收 RTL 文件哈希仍与当前源码一致。在相同接线下再次发送一帧，ILA 没有触发 `frame_valid`。改为 `debug_error` 触发后的[原始 1024 样本 CSV](evidence/eth1_udp_20261003/can_ack_delimiter_error.csv)显示：CRC delimiter 样本 310 为 `1`，ACK slot 样本 410 为 `1`（没有节点 ACK），ACK delimiter 样本 510 为 `0`；样本 512 的 `debug_error_code=0x03`，parser 正处于恢复状态。Git 仓库存储的 CSV（LF 换行）SHA-256 为 `b23dca55f79b54417662569364679aeca26840e5edab1d87a4de2944a4c733ca`，用于核对直接下载的归档字节。此前记录的 `47df71ab5b1b2e17cc259cc7c5d459fc3291cafdb1fd5995598e36bba0f66165` 对应相同内容逐行转换为 CRLF 后的字节序列；配置了换行转换的 Windows checkout 可能得到该变体。本次只纠正文档中的校验口径，没有改写 CSV 数据或新增实测。CANable 固件的 `V` 命令只证明命令解析顺序，**不证明物理发送成功或获得 ACK**。
 
 这些位值与“总线没有第二个 ACK 节点，发送控制器检测到 ACK 错误并发出主动错误标志”相符；仅凭现有波形不能排除另一个同时发生的总线错误。[Bosch CAN 2.0 规范](https://tech-tools.com/files/can2spec.pdf)规定 ACK delimiter 为隐性，错误主动节点会发送显性错误标志，而错误被动节点只能发送隐性错误标志。当前 parser 报 form error 是正确行为，不能为使测试变绿而接受这帧。FPGA 继续保持被动监听，B14 不参与 ACK。
 

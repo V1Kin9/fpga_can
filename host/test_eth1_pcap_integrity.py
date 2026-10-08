@@ -1,3 +1,4 @@
+import hashlib
 import struct
 import subprocess
 import sys
@@ -125,6 +126,23 @@ class PcapIntegrityTest(unittest.TestCase):
         self.assert_passes(result)
         self.assertIn("CRC_OK=False", result.stdout)
 
+    def test_data_only_requires_a_matching_crc_valid_frame(self):
+        self.assert_passes(self.check_payloads(
+            [fcan_payload(10, frame_record(can_id=0x456))], "--data", "a5"))
+        for record in (frame_record(data=b"\xa6"), frame_record(crc_ok=False),
+                       bytes((2,)) + bytes(31), bytes((1, 2)) + bytes(30)):
+            with self.subTest(record=record):
+                self.assert_fails(self.check_payloads(
+                    [fcan_payload(10, record)], "--data", "a5"),
+                    "expected CAN frame is absent")
+
+    def test_explicit_empty_data_asserts_zero_length_payload(self):
+        self.assert_passes(self.check_payloads(
+            [fcan_payload(10, frame_record(data=b""))], "--data", ""))
+        self.assert_fails(self.check_payloads(
+            [fcan_payload(10, frame_record())], "--data", ""),
+            "expected CAN frame is absent")
+
     def test_session_sequences_start_independently(self):
         packets = [check_eth1_pcap.decode_payload(fcan_payload(sequence, session=session))
                    for session, sequence in ((1, 77), (1, 78), (2, 5), (2, 6))]
@@ -154,6 +172,21 @@ class PcapIntegrityTest(unittest.TestCase):
         self.assert_fails(self.run_checker(evidence / "can_no_ack.pcap",
                                           "--can-id", "0x123", "--data", "a5"),
                           "expected CAN frame is absent")
+        self.assert_fails(self.run_checker(evidence / "can_no_ack.pcap", "--data", "deadbeef"),
+                          "expected CAN frame is absent")
+
+    def test_archived_csv_checksum_line_endings_are_documented(self):
+        evidence = ROOT / "docs" / "evidence" / "eth1_udp_20261003"
+        # Git stores LF; a checkout configured for CRLF may expose that variant.
+        # Normalize only in memory and verify both documented byte digests.
+        data = (evidence / "can_ack_delimiter_error.csv").read_bytes().replace(b"\r\n", b"\n")
+        lf_digest = hashlib.sha256(data).hexdigest()
+        crlf_digest = hashlib.sha256(data.replace(b"\n", b"\r\n")).hexdigest()
+        self.assertEqual(lf_digest, "b23dca55f79b54417662569364679aeca26840e5edab1d87a4de2944a4c733ca")
+        self.assertEqual(crlf_digest, "47df71ab5b1b2e17cc259cc7c5d459fc3291cafdb1fd5995598e36bba0f66165")
+        documentation = (ROOT / "docs" / "eth1_udp_board_bringup.md").read_text(encoding="utf-8")
+        self.assertIn(lf_digest, documentation)
+        self.assertIn(crlf_digest, documentation)
 
 
 if __name__ == "__main__":

@@ -126,7 +126,7 @@ def main() -> int:
         statuses = [status for packet in decoded for status in packet.statuses]
         errors = [error for packet in decoded for error in packet.errors]
         validate_fcan_sequences(decoded)
-        expected_data = bytes.fromhex(args.data) if args.data else None
+        expected_data = bytes.fromhex(args.data) if args.data is not None else None
         print(f"FCAN v2 UDP: {len(rows)} packets; {len(frames)} CAN frames, "
               f"{len(statuses)} statuses, {len(errors)} parser errors")
         if statuses:
@@ -137,8 +137,8 @@ def main() -> int:
                   f"queue_drops={latest.queue_drop_count}")
         for error in errors[:10]:
             print(f"  CAN_ERROR code={error.error_code} tick={error.timestamp_ticks}")
-        if args.can_id is not None and not any(
-            frame.crc_ok and frame.can_id == args.can_id and
+        if (args.can_id is not None or expected_data is not None) and not any(
+            frame.crc_ok and (args.can_id is None or frame.can_id == args.can_id) and
             (expected_data is None or frame.payload == expected_data)
             for frame in frames
         ):
