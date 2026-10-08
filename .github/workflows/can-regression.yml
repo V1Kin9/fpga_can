@@ -23,3 +23,6 @@ jobs:
       - name: Run ETH1 capture checker regressions
         shell: pwsh
         run: ./scripts/test_eth1_phy_capture.ps1
+      - name: Run ETH1 implementation environment regressions
+        shell: pwsh
+        run: ./scripts/test_eth1_impl_environment.ps1

@@ -19,7 +19,10 @@ try {
     try {
         & (Join-Path $VivadoBin "xvlog.bat") -sv @($sources.Name)
         if ($LASTEXITCODE -ne 0) { throw "xvlog failed" }
-        & (Join-Path $VivadoBin "xelab.bat") $Top -s "${Top}_sim"
+        $glbl = Join-Path (Split-Path $VivadoBin -Parent) "data\verilog\src\glbl.v"
+        & (Join-Path $VivadoBin "xvlog.bat") $glbl
+        if ($LASTEXITCODE -ne 0) { throw "xvlog glbl failed" }
+        & (Join-Path $VivadoBin "xelab.bat") -L unisims_ver $Top glbl -s "${Top}_sim"
         if ($LASTEXITCODE -ne 0) { throw "xelab failed" }
         & (Join-Path $VivadoBin "xsim.bat") "${Top}_sim" -runall 2>&1 |
             Tee-Object -FilePath "xsim_console.log"
