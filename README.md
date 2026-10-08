@@ -109,8 +109,8 @@ python3 host/fcan_socketcan_bridge.py --bind 127.0.0.1 --port 5000 --interface v
 candump vcan0
 ```
 
-此处回环地址用于主机本地验证。接收实体 FPGA 的 UDP 时，`--bind` 指向主机以太网地址，并必须用 `--source-ip` 指定 FPGA 的源 IPv4 地址；bridge 拒绝其他来源。源 IP 过滤不能抵御同网段地址伪造，实包接入应放在可信、隔离的网络。`--verbose` 打印 FPGA 时间戳、数据报序号和原始 DLC。bridge 检测丢包、重复、倒序和序号环绕；v2 通过外部提供的 `session_id` 识别重启，保留最近 256 个已退休 session 以拒绝迟到包，v1 仍使用归零启发式判断。普通 SocketCAN 时间戳由主机内核产生，不能替代 FPGA SOF 时间戳。真实 vcan 可选脚本与离线抓包方式见 [诊断与抓包](docs/diagnostics.md)；尚未在实体以太网链路上贯通。
+此处回环地址用于主机本地验证。接收实体 FPGA 的 UDP 时，`--bind` 指向主机以太网地址，并必须用 `--source-ip` 指定 FPGA 的源 IPv4 地址；bridge 拒绝其他来源。源 IP 过滤不能抵御同网段地址伪造，实包接入应放在可信、隔离的网络。`--verbose` 打印 FPGA 时间戳、数据报序号和原始 DLC。bridge 检测丢包、重复、倒序和序号环绕；v2 通过外部提供的 `session_id` 识别重启，保留最近 256 个已退休 session 以拒绝迟到包，v2 同一 session 的迟到零号包不会被误判为重启；v1 仍使用有歧义的归零启发式判断。普通 SocketCAN 时间戳由主机内核产生，不能替代 FPGA SOF 时间戳。真实 vcan 可选脚本与离线抓包方式见 [诊断与抓包](docs/diagnostics.md)；尚未在实体以太网链路上贯通。
 
 ## 当前不包含
 
-工程不包含 CAN FD、CAN 主动发送、Ethernet RX、ARP 或 DHCP。ETH1 当前仅支持 1000 Mb/s 全双工单向发送，MAC/IP 地址和 FCAN board-test session ID 均固定；实际板级走线偏差和 PHY TXC 延迟容差仍需测量，不能把当前 STA 模型视为最终硬件签核。
+工程不包含 CAN FD、CAN 主动发送、Ethernet RX、ARP 或 DHCP。ETH1 当前仅支持 1000 Mb/s 全双工单向发送，MAC/IP 地址固定；FCAN board-test session 在每次链路掉线时递增，完整 core 复位或重配置后仍会复用 `INITIAL_SESSION` 种子，尚无持久启动身份来源；实际板级走线偏差和 PHY TXC 延迟容差仍需测量，不能把当前 STA 模型视为最终硬件签核。

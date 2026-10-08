@@ -30,6 +30,7 @@ $tops = @(
     "tb_mac_idle_reset",
     "tb_eth1_phy_probe",
     "tb_eth1_fixed_udp_sender",
+    "tb_eth1_link_session",
     "tb_gmii_to_rgmii_tx",
     "tb_can_bitrate_125000",
     "tb_can_bitrate_250000",

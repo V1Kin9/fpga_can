@@ -8,6 +8,7 @@ import logging
 import socket
 import struct
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import BinaryIO, TextIO
 
@@ -17,6 +18,7 @@ LOG = logging.getLogger("fcan_capture")
 LINKTYPE_CAN_SOCKETCAN = 227
 CAN_EFF_FLAG = 0x80000000
 CAN_RTR_FLAG = 0x40000000
+MAX_RETIRED_SESSIONS = 256
 
 
 def _option(code: int, value: bytes) -> bytes:
@@ -75,7 +77,10 @@ def candump_line(record: CanRecord, interface: str = "can0") -> str:
 
 class Capture:
     def __init__(self, pcap: PcapngWriter | None, log: TextIO | None,
-                 interface: str = "can0") -> None:
+                 interface: str = "can0", *,
+                 max_retired_sessions: int = MAX_RETIRED_SESSIONS) -> None:
+        if max_retired_sessions < 1:
+            raise ValueError("max_retired_sessions must be positive")
         self.pcap = pcap
         self.log = log
         self.interface = interface
@@ -84,6 +89,9 @@ class Capture:
         self.epoch_offset_ns: int | None = None
         self.last_tick: int | None = None
         self.previous_sequence: int | None = None
+        self.max_retired_sessions = max_retired_sessions
+        self.retired_sessions: OrderedDict[int, None] = OrderedDict()
+        self.retired_history_evictions = 0
 
     def _event(self, message: str) -> None:
         LOG.warning(message)
@@ -98,17 +106,51 @@ class Capture:
         except ValueError as exc:
             self._event(f"invalid FCAN datagram: {exc}")
             return 0
+        # Classify the packet before changing sequence/session/timestamp state.
+        # Empty headers are never emitted by the FPGA and cannot start an epoch.
+        if not packet.records:
+            self._event("empty FCAN datagram; dropping")
+            return 0
+        if (packet.version == 2 and packet.session_id in self.retired_sessions and
+                packet.session_id != self.session_id):
+            self._event(f"stale FCAN session packet: session={packet.session_id} "
+                        f"seq={packet.sequence}; dropping")
+            return 0
         changed = self.version is not None and (packet.version != self.version or
                    (packet.version == 2 and packet.session_id != self.session_id))
+        legacy_restart = False
+        if not changed and self.previous_sequence is not None:
+            expected = (self.previous_sequence + 1) & 0xFFFFFFFF
+            gap = (packet.sequence - expected) & 0xFFFFFFFF
+            if (packet.version == 1 and packet.sequence == 0 and expected != 0 and
+                    self.previous_sequence != 0):
+                # Legacy v1 has no session ID: zero is only a restart heuristic.
+                # A delayed zero can look like reset, and a lost zero can hide
+                # one. v2 must use a new session ID, never this fallback.
+                legacy_restart = True
+            elif gap >= 0x80000000:
+                self._event(f"duplicate/reordered FCAN packet: got={packet.sequence} "
+                            f"expected={expected}; dropping")
+                return 0
+            elif gap:
+                self._event(f"FCAN sequence discontinuity: expected={expected} got={packet.sequence}")
         if changed:
+            if self.version == 2 and self.session_id is not None:
+                # Match the bridge's bounded recent-session history; replay
+                # older than this window cannot be identified indefinitely.
+                self.retired_sessions[self.session_id] = None
+                self.retired_sessions.move_to_end(self.session_id)
+                if len(self.retired_sessions) > self.max_retired_sessions:
+                    self.retired_sessions.popitem(last=False)
+                    self.retired_history_evictions += 1
+                    if self.retired_history_evictions == 1:
+                        self._event("FCAN retired-session history is full; oldest epoch forgotten")
             self._event(f"FCAN session changed: {self.session_id} -> {packet.session_id}")
+        elif legacy_restart:
+            self._event(f"FCAN v1 sequence restarted at zero after {self.previous_sequence}")
+        if changed or legacy_restart:
             self.epoch_offset_ns = None
             self.last_tick = None
-            self.previous_sequence = None
-        if self.previous_sequence is not None:
-            expected = (self.previous_sequence + 1) & 0xFFFFFFFF
-            if packet.sequence != expected:
-                self._event(f"FCAN sequence discontinuity: expected={expected} got={packet.sequence}")
         self.previous_sequence = packet.sequence
         self.session_id = packet.session_id
         self.version = packet.version
@@ -126,7 +168,15 @@ class Capture:
                 self._event(f"CAN_FRAME CRC_OK=0 id=0x{frame.can_id:x} fpga_ticks={frame.timestamp_ticks}; skipped")
                 continue
             if self.last_tick is not None and frame.timestamp_ticks < self.last_tick:
-                self._event("FPGA timestamp moved backward; starting new capture epoch")
+                if packet.version == 2:
+                    # An in-order v2 packet can still contain a bad SOF tick.
+                    # Skip that frame without moving the epoch or tick high
+                    # water mark; only a session change proves a clock reset.
+                    self._event("FPGA timestamp moved backward within FCAN v2 session; frame skipped")
+                    continue
+                # Keep the legacy v1 clock-reset fallback, but only after the
+                # datagram has passed ordering checks above.
+                self._event("FPGA timestamp moved backward; starting new v1 capture epoch")
                 self.epoch_offset_ns = None
             self.last_tick = frame.timestamp_ticks
             if self.epoch_offset_ns is None:

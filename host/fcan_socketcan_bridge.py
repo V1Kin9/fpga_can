@@ -169,11 +169,12 @@ class Bridge:
         if self.previous_seq is not None:
             expected = (self.previous_seq + 1) & 0xFFFFFFFF
             gap = (sequence - expected) & 0xFFFFFFFF
-            if sequence == 0 and expected != 0 and self.previous_seq != 0:
-                # The FPGA packetizer restarts at zero after reset. FCAN v1
-                # has no epoch field; v2 can also reuse the same externally
-                # supplied session_id. In both cases zero is the fallback
-                # restart marker. Normal 0xffffffff -> 0 wrap is handled above.
+            if (packet.version == 1 and sequence == 0 and expected != 0
+                    and self.previous_seq != 0):
+                # Legacy v1 has no epoch field, so keep its ambiguous zero
+                # fallback. In v2 only a changed session denotes a restart:
+                # an old delayed zero must not rewind the active watermark.
+                # Normal 0xffffffff -> 0 wrap is handled as an in-order packet.
                 self.reset_epochs += 1
                 LOG.warning("FCAN sequence restarted at zero after %u; accepting new epoch", self.previous_seq)
             elif gap >= 0x80000000:

@@ -48,7 +48,7 @@ DLC 9～15 保留原始 4 位值，但 Classical CAN 的有效载荷仍为 8 字
 | 12 | 4 | session ID | 由顶层 `session_id[31:0]` 提供，打包器只复制它 |
 | 16 | 4 | reserved | 零 |
 
-所有多字节字段均为大端。`session_id` 在首条记录进入打包器时锁存并保持到本包发完；系统集成者应在复位后提供新的、稳定的值。当前 RTL **没有**可靠的持久化启动计数或随机源，也不保证默认零值可区分重启。板级来源待实物集成确定。主机以 v2 的 `session_id` 改变作为新轮次，即使新轮次的序号零包丢失也能识别；若不同启动轮次重用同一值，则仍无法可靠区分。
+所有多字节字段均为大端。`session_id` 在首条记录进入打包器时锁存并保持到本包发完；系统集成者应在复位后提供新的、稳定的值。当前 RTL **没有**可靠的持久化启动计数或随机源，也不保证默认零值可区分重启。ETH1 板级顶层用不受链路复位影响的 32 位计数器，在每次观测到 link-ready 由高变低时递增 session，保证链路恢复的新轮次不再复用旧 ID；`INITIAL_SESSION` 顶层参数可覆盖初值（默认 `0x20261003`）。**完整 core 复位、掉电或重新配置会恢复该初值，不能保证启动唯一性；计数器环绕也会重用 ID。** 生产集成仍需要真实的外部或持久化启动身份来源，修改常量不能替代它。主机以 v2 的 `session_id` 改变作为新轮次，即使新轮次的序号零包丢失也能识别；若不同启动轮次重用同一值，则仍无法可靠区分。
 
 ## FCAN v2 固定记录
 
@@ -109,7 +109,7 @@ CAN RX → 单帧缓冲 → 多帧队列 → FCAN 打包器 → 数据报请求/
 python3 host/can_udp_decode.py --bind 0.0.0.0 --port 5000
 ```
 
-`can_udp_decode.py` 校验 magic、版本、头/记录长度、保留位、ID 范围和载荷总长度。`fcan_socketcan_bridge.py` 只把 CRC 正确的 CAN_FRAME 写入 Linux SocketCAN；CAN_ERROR/DEVICE_STATUS 以日志报告。普通 `can_frame.len` 将 DLC 9～15 钳为 8。bridge 拒绝不含记录的空包，避免它改变当前 session；还检测序号间隙、重复、倒序和自然环绕。v2 session ID 改变时保存旧 ID，之后到达的最近 256 个已退休 session 的延迟包会被丢弃。超过窗口的旧 ID 无法无限期识别。非回环 UDP 监听必须配置 `--source-ip`，只接受该来源；这不是身份认证，实包接入应使用可信隔离网络。v1 以及复用同一 session ID 的 v2 流都对非环绕的序号归零采用启发式重启判断；若同一 session 重启后的零号包丢失，仍无法无歧义判断新轮次，因此板级 session ID 仍应尽量保证每次启动不同。离线抓包工具见 [诊断架构](diagnostics.md)。
+`can_udp_decode.py` 校验 magic、版本、头/记录长度、保留位、ID 范围和载荷总长度。`fcan_socketcan_bridge.py` 只把 CRC 正确的 CAN_FRAME 写入 Linux SocketCAN；CAN_ERROR/DEVICE_STATUS 以日志报告。普通 `can_frame.len` 将 DLC 9～15 钳为 8。bridge 拒绝不含记录的空包，避免它改变当前 session；还检测序号间隙、重复、倒序和自然环绕。v2 session ID 改变时保存旧 ID，之后到达的最近 256 个已退休 session 的延迟包会被丢弃。超过窗口的旧 ID 无法无限期识别。非回环 UDP 监听必须配置 `--source-ip`，只接受该来源；这不是身份认证，实包接入应使用可信隔离网络。只有 v1 对非环绕的序号归零保留启发式重启判断，其迟到零号包和丢失重启零号包仍有歧义。v2 只通过 session 改变识别新轮次；同一 session 内的重复、倒序和迟到零号包均丢弃，不回退序号水位。完整重启后若 session 重用，则无法无歧义自动恢复；当前板级实现的可靠恢复范围是一次 core 运行内的链路复位。离线抓包工具见 [诊断架构](diagnostics.md)。
 
 ## 验证边界
 

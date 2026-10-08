@@ -149,18 +149,52 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(self.bridge.old_packets, 1)
         self.assertEqual(len(self.sink.frames), 1)
 
-    def test_v2_same_session_sequence_restart_is_accepted(self):
+    def test_v2_delayed_zero_cannot_restart_same_session(self):
         self.assertEqual(self.bridge.process_datagram(
             fcan_v2_packet(100, 7, fcan_v2_record(0x100))), 1)
         with self.assertLogs("fcan_socketcan_bridge", level="WARNING") as logs:
             self.assertEqual(self.bridge.process_datagram(
-                fcan_v2_packet(0, 7, fcan_v2_record(0x101))), 1)
+                fcan_v2_packet(0, 7, fcan_v2_record(0x101))), 0)
+        self.assertIn("duplicate/reordered", "\n".join(logs.output))
+        self.assertEqual(self.bridge.previous_seq, 100)
+        self.assertEqual(self.bridge.previous_session, 7)
+        self.assertEqual(self.bridge.reset_epochs, 0)
         self.assertEqual(self.bridge.process_datagram(
-            fcan_v2_packet(1, 7, fcan_v2_record(0x102))), 1)
-        self.assertIn("restarted at zero", "\n".join(logs.output))
-        self.assertEqual(self.bridge.reset_epochs, 1)
+            fcan_v2_packet(101, 7, fcan_v2_record(0x102))), 1)
         self.assertEqual([unpack_frame(frame)[0] for frame in self.sink.frames],
-                         [0x100, 0x101, 0x102])
+                         [0x100, 0x102])
+
+    def test_v2_link_recovery_does_not_need_first_packet(self):
+        initial_session = 0x20261003
+        self.assertEqual(self.bridge.process_datagram(
+            fcan_v2_packet(100, initial_session, fcan_v2_record(0x100))), 1)
+        # The board increments session on link loss. Sequence zero is lost;
+        # sequence one must be forwarded immediately, below the old watermark.
+        self.assertEqual(self.bridge.process_datagram(
+            fcan_v2_packet(1, initial_session + 1, fcan_v2_record(0x101))), 1)
+        self.assertEqual(self.bridge.reset_epochs, 1)
+        self.assertEqual(self.bridge.previous_seq, 1)
+        self.assertEqual(self.bridge.missing_packets, 0)
+        # Delayed packets on either side of the old watermark must not undo
+        # the new epoch. A duplicate in the current epoch also stays dropped.
+        for seq, session in ((0, initial_session), (101, initial_session),
+                             (1, initial_session + 1), (0, initial_session + 1)):
+            self.assertEqual(self.bridge.process_datagram(
+                fcan_v2_packet(seq, session, fcan_v2_record(0x102))), 0)
+            self.assertEqual(self.bridge.previous_session, initial_session + 1)
+            self.assertEqual(self.bridge.previous_seq, 1)
+        self.assertEqual(self.bridge.process_datagram(
+            fcan_v2_packet(2, initial_session + 1, fcan_v2_record(0x103))), 1)
+        self.assertEqual([unpack_frame(frame)[0] for frame in self.sink.frames],
+                         [0x100, 0x101, 0x103])
+
+    def test_v2_same_session_natural_wrap_is_not_a_reset(self):
+        for sequence in (0xFFFFFFFF, 0, 1):
+            self.assertEqual(self.bridge.process_datagram(
+                fcan_v2_packet(sequence, 7, fcan_v2_record())), 1)
+        self.assertEqual(self.bridge.reset_epochs, 0)
+        self.assertEqual(self.bridge.missing_packets, 0)
+        self.assertEqual(self.bridge.previous_seq, 1)
 
     def test_v2_retired_session_packets_are_dropped_without_state_change(self):
         self.assertEqual(self.bridge.process_datagram(

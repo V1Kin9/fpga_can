@@ -1,9 +1,12 @@
 `timescale 1ns/1ps
 
 // Board-test top: passive CAN RX on D13 to FCAN v2 UDP on ETH1/J1.
-// Uses fixed, bench-only L2/L3 addresses and a fixed session marker.
+// Uses fixed, bench-only L2/L3 addresses and a per-link-run session marker.
 module eth1_can_udp_top #(
-    parameter integer CAN_BITRATE = 500000
+    parameter integer CAN_BITRATE = 500000,
+    // Integration may override this seed, but a build-time constant is not a
+    // unique boot identity. Full core reset restores it (see protocol notes).
+    parameter [31:0] INITIAL_SESSION = 32'h20261003
 ) (
     input  wire       clk_50m,
     input  wire       rst_n,
@@ -44,17 +47,13 @@ module eth1_can_udp_top #(
 
     // A link loss clears in-flight packets. Application traffic starts only
     // after MDIO confirms a resolved 1 Gb/s full-duplex link.
-    (* ASYNC_REG="TRUE" *) reg phy_ready_meta_50m;
-    (* ASYNC_REG="TRUE" *) reg phy_ready_sync_50m;
-    always @(posedge clk_50m_i or negedge core_rst_n) begin
-        if (!core_rst_n) begin
-            phy_ready_meta_50m <= 1'b0;
-            phy_ready_sync_50m <= 1'b0;
-        end else begin
-            phy_ready_meta_50m <= phy_ready_125m;
-            phy_ready_sync_50m <= phy_ready_meta_50m;
-        end
-    end
+    wire pipeline_rst_n;
+    wire [31:0] session_id;
+    eth1_link_session #(.INITIAL_SESSION(INITIAL_SESSION)) u_link_session (
+        .clk_50m(clk_50m_i), .core_rst_n(core_rst_n),
+        .phy_ready_125m(phy_ready_125m),
+        .pipeline_rst_n(pipeline_rst_n), .session_id(session_id)
+    );
 
     can_gmii_pipeline_top #(
         .CAN_BITRATE(CAN_BITRATE),
@@ -65,8 +64,8 @@ module eth1_can_udp_top #(
         .SRC_PORT(16'd5000), .DST_PORT(16'd5000)
     ) u_pipeline (
         .clk_50m(clk_50m_i), .gmii_clk_125m(clk_125m_i),
-        .rst_n(core_rst_n && phy_ready_sync_50m),
-        .can_rx(can_rx), .session_id(32'h20261003),
+        .rst_n(pipeline_rst_n),
+        .can_rx(can_rx), .session_id(session_id),
         .can_tx(can_tx),
         .gmii_tx_en(gmii_tx_en), .gmii_tx_er(gmii_tx_er),
         .gmii_txd(gmii_txd), .queue_level(queue_level),
