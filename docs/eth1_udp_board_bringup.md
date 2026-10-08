@@ -32,7 +32,7 @@ PHY-ready 50 MHz 寄存器修订后，重新从当前源码实现固定顶层，
 
 ## CAN→UDP 测试
 
-`eth1_can_udp_top` 复用上述 ETH1 物理层，把现有 50 MHz 被动 CAN 接收、FCAN v2 打包、50→125 MHz 帧 CDC 与 GMII MAC 接到 RGMII TX。顶层使用固定 `session_id=0x20261003` 便于本次抓包识别；它在复位后不会变化，**不满足生产环境对重启轮次唯一性的要求**。链路断开会清空正在处理的数据，恢复后重新开始。
+`eth1_can_udp_top` 复用上述 ETH1 物理层，把现有 50 MHz 被动 CAN 接收、FCAN v2 打包、50→125 MHz 帧 CDC 与 GMII MAC 接到 RGMII TX。下列 2026-10-03 的已归档镜像使用固定 `session_id=0x20261003`，**不满足生产环境对重启轮次唯一性的要求**。当前源码已改为每次观测到链路掉线时递增 session，计数器不受链路引起的流水线复位影响；链路断开仍清空正在处理的数据，恢复后从 sequence 0 开始，即使该首包丢失，主机也能用后续包的新 session 恢复。`INITIAL_SESSION` 可覆盖初值，但完整 core 复位（包括失锁）、掉电或重配置仍恢复该初值，32 位环绕也会重用 ID；没有外部/持久化启动身份来源，不能宣称完整重启唯一性。下面的历史板级实测不包含这次恢复修正，需重新实现和上板验证。
 
 Vivado 2020.1 对集成顶层完成布线与 bitstream：WNS `+0.282 ns`、WHS `+0.086 ns`、DRC 0。JTAG 下载成功；路由器每秒收到该顶层的 FCAN v2 `DEVICE_STATUS`，说明集成配置中的 PHY、RGMII、MAC、帧 CDC 和状态封装确实工作。测试用 bitstream SHA-256 为 `a4baf4533b7de771caa8fbc59c9e8df3fda993229ffc104f700460a8e9577355`。
 
@@ -126,6 +126,6 @@ subst X: /D
 tcpdump -i eth1 -nn -e -vv -XX -c 20 'udp dst port 5000 and src host 192.168.8.250'
 ```
 
-随后可将两个命令的 `-Top` 改为 `eth1_can_udp_top`，路由器抓 FCAN v2 UDP，再用 `scripts/check_eth1_pcap.py fcan` 和预期 CAN ID/数据复核。JTAG 下载任一新顶层会替换当前 FPGA 配置；测试结束后应按所需功能重新下载相应配置。
+随后可将两个命令的 `-Top` 改为 `eth1_can_udp_top`，路由器抓 FCAN v2 UDP，再用 `scripts/check_eth1_pcap.py fcan` 和预期 CAN ID/数据复核；默认允许链路恢复造成的 session 变化，若要固定核对历史镜像的单轮抓包可显式加 `--session-id 0x20261003`。该检查器验证线格式及预期帧存在，不代替主机接收端的去重/顺序策略。JTAG 下载任一新顶层会替换当前 FPGA 配置；测试结束后应按所需功能重新下载相应配置。
 
 时序参考：[AMD PG160 的外部 PHY 延迟及双边沿输出约束](https://docs.amd.com/r/en-US/pg160-gmii-to-rgmii/Constraining-the-Core)、[AMD UG903 的源同步输出约束说明](https://docs.amd.com/r/2022.1-English/ug903-vivado-using-constraints/Output-Delays)。板卡引脚及 TXDLY strap 核对见 [ETH1 板级审计](eth1_board_audit.md)。

@@ -93,13 +93,17 @@ def decode_udp(frame: bytes) -> bytes:
     return udp[8:]
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("fixed", "fcan"))
     parser.add_argument("pcap", type=Path)
     parser.add_argument("--can-id", type=lambda s: int(s, 0))
     parser.add_argument("--data", help="expected CAN data as contiguous hex")
-    args = parser.parse_args()
+    parser.add_argument("--session-id", type=lambda s: int(s, 0),
+                        help="require this FCAN v2 session ID (optional; links may restart)")
+    args = parser.parse_args(argv)
+    if args.session_id is not None and not 0 <= args.session_id <= 0xFFFFFFFF:
+        parser.error("--session-id must be in 0..0xffffffff")
     rows = [(stamp, decode_udp(frame)) for stamp, frame in packets(args.pcap)]
     if not rows:
         raise ValueError("pcap contains no matching packets")
@@ -120,8 +124,14 @@ def main() -> int:
               f"mean interval {sum(intervals)/len(intervals):.6f}s")
     else:
         decoded = [decode_payload(payload) for _, payload in rows]
-        if any(packet.version != 2 or packet.session_id != 0x20261003 for packet in decoded):
-            raise ValueError("unexpected FCAN version or bench session ID")
+        if any(packet.version != 2 for packet in decoded):
+            raise ValueError("unexpected FCAN version")
+        # Session changes are valid after link recovery. Pin a single expected
+        # ID only when explicitly verifying a particular archived capture.
+        if args.session_id is not None and any(
+            packet.session_id != args.session_id for packet in decoded
+        ):
+            raise ValueError("unexpected FCAN session ID")
         frames = [frame for packet in decoded for frame in packet.frames]
         statuses = [status for packet in decoded for status in packet.statuses]
         errors = [error for packet in decoded for error in packet.errors]

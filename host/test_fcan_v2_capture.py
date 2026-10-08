@@ -7,6 +7,12 @@ from fcan_capture import Capture, PcapngWriter, candump_line
 from fcan_socketcan_bridge import Bridge
 
 
+def v1_packet(sequence, tick):
+    return (b"FCAN" + bytes((1, 16, 24, 1)) + sequence.to_bytes(4, "big") + bytes(4) +
+            (0x123).to_bytes(4, "big") + bytes((4, 8, 0, 0)) + tick.to_bytes(8, "big") +
+            bytes(range(1, 9)))
+
+
 def v2_packet(sequence, session, *records):
     return (b"FCAN" + bytes((2, 20, 32, len(records))) +
             sequence.to_bytes(4, "big") + session.to_bytes(4, "big") + bytes(4) +
@@ -37,6 +43,12 @@ def blocks(data):
         offset += length
     assert offset == len(data)
     return result
+
+
+def pcap_timestamps(output):
+    return [(struct.unpack_from("<I", body, 4)[0] << 32) |
+            struct.unpack_from("<I", body, 8)[0]
+            for kind, body in blocks(output.getvalue()) if kind == 6]
 
 
 class FakeSink:
@@ -113,6 +125,180 @@ class V2Test(unittest.TestCase):
     def test_candump_relative_timestamp(self):
         record = decode_payload(v2_packet(0, 1, frame_record(tick=50_000_000))).frames[0]
         self.assertEqual(candump_line(record), "(1.000000) can0 123#0102030405060708")
+
+    def test_capture_reordered_and_duplicate_packets_do_not_reanchor(self):
+        output = io.BytesIO()
+        log = io.StringIO()
+        capture = Capture(PcapngWriter(output), log)
+        arrival = 1_700_000_000_000_000_000
+        self.assertEqual(capture.process_datagram(
+            v2_packet(10, 7, frame_record(tick=1000)), arrival), 1)
+        self.assertEqual(capture.process_datagram(
+            v2_packet(12, 7, frame_record(tick=3000)), arrival + 10_000_000), 1)
+        state = (capture.version, capture.session_id, capture.previous_sequence,
+                 capture.epoch_offset_ns, capture.last_tick)
+        for sequence, tick in ((11, 2000), (12, 3000), (0, 0)):
+            with self.subTest(sequence=sequence):
+                self.assertEqual(capture.process_datagram(
+                    v2_packet(sequence, 7, frame_record(tick=tick)), arrival + 20_000_000), 0)
+                self.assertEqual((capture.version, capture.session_id, capture.previous_sequence,
+                                  capture.epoch_offset_ns, capture.last_tick), state)
+        self.assertEqual(capture.process_datagram(
+            v2_packet(13, 7, frame_record(tick=4000)), arrival + 30_000_000), 1)
+        self.assertEqual(pcap_timestamps(output), [arrival, arrival + 40_000, arrival + 60_000])
+        self.assertEqual(sum(line.startswith("(") for line in log.getvalue().splitlines()), 3)
+        self.assertIn("duplicate/reordered", log.getvalue())
+
+    def test_capture_sequence_wrap_preserves_epoch(self):
+        output = io.BytesIO()
+        capture = Capture(PcapngWriter(output), None)
+        arrival = 1_700_000_000_000_000_000
+        for index, sequence in enumerate((0xFFFFFFFE, 0xFFFFFFFF, 0, 1)):
+            self.assertEqual(capture.process_datagram(
+                v2_packet(sequence, 7, frame_record(tick=100 + index * 100)),
+                arrival + index * 1_000_000), 1)
+        self.assertEqual(pcap_timestamps(output),
+                         [arrival, arrival + 2000, arrival + 4000, arrival + 6000])
+        self.assertEqual(capture.previous_sequence, 1)
+        self.assertEqual(capture.epoch_offset_ns, arrival - 2000)
+
+    def test_capture_new_session_reanchors_without_sequence_zero(self):
+        for new_sequence in (1, 100):
+            with self.subTest(new_sequence=new_sequence):
+                output = io.BytesIO()
+                capture = Capture(PcapngWriter(output), None)
+                arrival = 1_700_000_000_000_000_000
+                self.assertEqual(capture.process_datagram(
+                    v2_packet(77, 1, frame_record(tick=50_000)), arrival), 1)
+                self.assertEqual(capture.process_datagram(
+                    v2_packet(new_sequence, 2, frame_record(tick=100)), arrival + 2_000_000), 1)
+                for old_sequence in (78, 0):
+                    self.assertEqual(capture.process_datagram(
+                        v2_packet(old_sequence, 1, frame_record(tick=60_000)),
+                        arrival + 4_000_000), 0)
+                    self.assertEqual((capture.version, capture.session_id, capture.previous_sequence,
+                                      capture.epoch_offset_ns, capture.last_tick),
+                                     (2, 2, new_sequence, arrival + 1_998_000, 100))
+                self.assertEqual(capture.process_datagram(
+                    v2_packet(new_sequence + 1, 2, frame_record(tick=150)),
+                    arrival + 6_000_000), 1)
+                self.assertEqual(pcap_timestamps(output),
+                                 [arrival, arrival + 2_000_000, arrival + 2_001_000])
+                self.assertEqual(list(capture.retired_sessions), [1])
+
+    def test_capture_new_session_diagnostics_wait_for_first_frame_anchor(self):
+        output = io.BytesIO()
+        capture = Capture(PcapngWriter(output), None)
+        arrival = 1_700_000_000_000_000_000
+        capture.process_datagram(v2_packet(77, 1, frame_record(tick=50_000)), arrival)
+        self.assertEqual(capture.process_datagram(
+            v2_packet(1, 2, error_record(), status_record()), arrival + 1_000_000), 0)
+        self.assertEqual((capture.session_id, capture.previous_sequence), (2, 1))
+        self.assertIsNone(capture.epoch_offset_ns)
+        self.assertIsNone(capture.last_tick)
+        self.assertEqual(capture.process_datagram(
+            v2_packet(2, 2, frame_record(tick=100)), arrival + 5_000_000), 1)
+        self.assertEqual(pcap_timestamps(output), [arrival, arrival + 5_000_000])
+
+    def test_capture_in_order_backward_ticks_do_not_reanchor(self):
+        output = io.BytesIO()
+        log = io.StringIO()
+        capture = Capture(PcapngWriter(output), log)
+        arrival = 1_700_000_000_000_000_000
+        capture.process_datagram(v2_packet(0, 7, frame_record(tick=1000)), arrival)
+        self.assertEqual(capture.process_datagram(
+            v2_packet(1, 7, frame_record(tick=900)), arrival + 1_000_000), 0)
+        self.assertEqual((capture.previous_sequence, capture.epoch_offset_ns, capture.last_tick),
+                         (1, arrival - 20_000, 1000))
+        self.assertEqual(capture.process_datagram(
+            v2_packet(2, 7, frame_record(tick=1100), frame_record(tick=1000),
+                      frame_record(tick=1200)), arrival + 2_000_000), 2)
+        self.assertEqual(capture.process_datagram(
+            v2_packet(3, 7, frame_record(tick=1300)), arrival + 3_000_000), 1)
+        self.assertEqual(pcap_timestamps(output),
+                         [arrival, arrival + 2000, arrival + 4000, arrival + 6000])
+        self.assertEqual(capture.last_tick, 1300)
+        self.assertEqual(capture.epoch_offset_ns, arrival - 20_000)
+        self.assertEqual(log.getvalue().count("FPGA timestamp moved backward"), 2)
+
+    def test_capture_empty_or_invalid_packets_do_not_retire_session(self):
+        output = io.BytesIO()
+        capture = Capture(PcapngWriter(output), None)
+        arrival = 1_700_000_000_000_000_000
+        capture.process_datagram(v2_packet(10, 1, frame_record(tick=100)), arrival)
+        for payload in (v2_packet(0, 2), b"invalid"):
+            self.assertEqual(capture.process_datagram(payload, arrival + 1_000_000), 0)
+            self.assertEqual((capture.version, capture.session_id, capture.previous_sequence,
+                              capture.epoch_offset_ns, capture.last_tick),
+                             (2, 1, 10, arrival - 2000, 100))
+            self.assertEqual(list(capture.retired_sessions), [])
+        self.assertEqual(capture.process_datagram(
+            v2_packet(11, 1, frame_record(tick=200)), arrival + 2_000_000), 1)
+        self.assertEqual(pcap_timestamps(output), [arrival, arrival + 2000])
+
+    def test_capture_retired_session_history_is_bounded(self):
+        output = io.BytesIO()
+        capture = Capture(PcapngWriter(output), None, max_retired_sessions=3)
+        for session in range(1, 6):
+            self.assertEqual(capture.process_datagram(
+                v2_packet(1, session, frame_record()), session * 1_000_000_000), 1)
+        self.assertEqual(list(capture.retired_sessions), [2, 3, 4])
+        self.assertEqual(capture.retired_history_evictions, 1)
+        self.assertEqual(capture.process_datagram(v2_packet(2, 4, frame_record()), 9_000_000_000), 0)
+        self.assertEqual((capture.session_id, capture.previous_sequence, capture.epoch_offset_ns),
+                         (5, 1, 4_999_998_000))
+        self.assertEqual(list(capture.retired_sessions), [2, 3, 4])
+        self.assertEqual(pcap_timestamps(output), [n * 1_000_000_000 for n in range(1, 6)])
+
+    def test_capture_retired_session_limit_must_be_positive(self):
+        for limit in (0, -1):
+            with self.subTest(limit=limit), self.assertRaises(ValueError):
+                Capture(None, None, max_retired_sessions=limit)
+
+    def test_capture_v1_restart_and_backward_tick_compatibility(self):
+        output = io.BytesIO()
+        capture = Capture(PcapngWriter(output), None)
+        arrival = 1_700_000_000_000_000_000
+        self.assertEqual(capture.process_datagram(v1_packet(10, 1000), arrival), 1)
+        self.assertEqual(capture.process_datagram(v1_packet(0, 100), arrival + 1_000_000), 1)
+        self.assertEqual(capture.process_datagram(v1_packet(0, 50), arrival + 2_000_000), 0)
+        self.assertEqual(capture.process_datagram(v1_packet(1, 200), arrival + 3_000_000), 1)
+        # Accepted in-order v1 ticks can still establish a new clock epoch.
+        self.assertEqual(capture.process_datagram(v1_packet(2, 10), arrival + 4_000_000), 1)
+        self.assertEqual(capture.process_datagram(v1_packet(3, 60), arrival + 5_000_000), 1)
+        self.assertEqual(pcap_timestamps(output),
+                         [arrival, arrival + 1_000_000, arrival + 1_002_000,
+                          arrival + 4_000_000, arrival + 4_001_000])
+
+    def test_capture_v1_reordering_cannot_trigger_backward_tick_fallback(self):
+        output = io.BytesIO()
+        capture = Capture(PcapngWriter(output), None)
+        arrival = 1_700_000_000_000_000_000
+        capture.process_datagram(v1_packet(10, 1000), arrival)
+        capture.process_datagram(v1_packet(12, 3000), arrival + 1_000_000)
+        self.assertEqual(capture.process_datagram(v1_packet(11, 2000), arrival + 2_000_000), 0)
+        self.assertEqual((capture.previous_sequence, capture.epoch_offset_ns, capture.last_tick),
+                         (12, arrival - 20_000, 3000))
+        self.assertEqual(capture.process_datagram(v1_packet(13, 4000), arrival + 3_000_000), 1)
+        self.assertEqual(pcap_timestamps(output), [arrival, arrival + 40_000, arrival + 60_000])
+
+    def test_capture_version_change_retires_previous_v2_session(self):
+        output = io.BytesIO()
+        capture = Capture(PcapngWriter(output), None)
+        arrival = 1_700_000_000_000_000_000
+        capture.process_datagram(v2_packet(77, 0, frame_record(tick=1000)), arrival)
+        self.assertEqual(capture.process_datagram(v1_packet(1, 100), arrival + 1_000_000), 1)
+        self.assertEqual(capture.process_datagram(
+            v2_packet(78, 0, frame_record(tick=2000)), arrival + 2_000_000), 0)
+        self.assertEqual((capture.version, capture.session_id, capture.previous_sequence,
+                          capture.epoch_offset_ns, capture.last_tick),
+                         (1, None, 1, arrival + 998_000, 100))
+        self.assertEqual(capture.process_datagram(v1_packet(2, 150), arrival + 3_000_000), 1)
+        self.assertEqual(capture.process_datagram(
+            v2_packet(10, 1, frame_record(tick=10)), arrival + 4_000_000), 1)
+        self.assertEqual(pcap_timestamps(output),
+                         [arrival, arrival + 1_000_000, arrival + 1_001_000, arrival + 4_000_000])
+        self.assertEqual(list(capture.retired_sessions), [0])
 
     def test_capture_reports_diagnostics_and_skips_bad_crc(self):
         output = io.BytesIO()

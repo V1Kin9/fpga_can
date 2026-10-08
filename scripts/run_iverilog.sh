@@ -34,6 +34,7 @@ tops=(
   tb_eth1_phy_ready
   tb_eth1_fixed_udp_link_loss
   tb_eth1_fixed_udp_sender
+  tb_eth1_link_session
 )
 
 for top in "${tops[@]}"; do
