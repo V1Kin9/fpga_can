@@ -87,15 +87,18 @@ module eth1_board_support #(
         .mdio_ta_ok_debug(mdio_ta_ok_debug)
     );
 
+    wire phy_mode_ready;
+    eth1_phy_ready u_phy_ready (
+        .found_valid(found_valid), .found_addr(found_addr), .phy_id1(phy_id1),
+        .link_up(link_up), .autoneg_complete(autoneg_complete),
+        .physr(phy_physr), .ready(phy_mode_ready)
+    );
     reg phy_ready_50m;
     always @(posedge clk_50m_i or negedge core_rst_n) begin
         if (!core_rst_n)
             phy_ready_50m <= 1'b0;
         else
-            phy_ready_50m <= found_valid && (found_addr == 5'd1) &&
-                             (phy_id1 == 16'h001c) && link_up &&
-                             autoneg_complete && phy_physr[11] && phy_physr[10] &&
-                             (phy_physr[15:14] == 2'b10);
+            phy_ready_50m <= phy_mode_ready;
     end
     (* ASYNC_REG="TRUE" *) reg phy_ready_meta;
     (* ASYNC_REG="TRUE" *) reg phy_ready_sync;

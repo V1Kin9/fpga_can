@@ -52,6 +52,22 @@ def checksum16(data: bytes) -> int:
     return value
 
 
+def validate_fcan_sequences(decoded):
+    """Require contiguous packets within each nonrepeating capture session."""
+    previous = None
+    seen_sessions = set()
+    for packet in decoded:
+        if previous is not None:
+            if packet.session_id == previous.session_id:
+                if packet.sequence != (previous.sequence + 1) & 0xFFFFFFFF:
+                    raise ValueError("FCAN sequence skipped, repeated, or reordered")
+            elif packet.session_id in seen_sessions:
+                raise ValueError("FCAN session ID reappeared after a session change")
+        # Captures may start mid-session, including after a session transition.
+        seen_sessions.add(packet.session_id)
+        previous = packet
+
+
 def decode_udp(frame: bytes) -> bytes:
     if len(frame) < 42 or frame[:6] != bytes.fromhex("9483c42aeb74"):
         raise ValueError("unexpected destination MAC or short Ethernet frame")
@@ -109,6 +125,7 @@ def main() -> int:
         frames = [frame for packet in decoded for frame in packet.frames]
         statuses = [status for packet in decoded for status in packet.statuses]
         errors = [error for packet in decoded for error in packet.errors]
+        validate_fcan_sequences(decoded)
         expected_data = bytes.fromhex(args.data) if args.data else None
         print(f"FCAN v2 UDP: {len(rows)} packets; {len(frames)} CAN frames, "
               f"{len(statuses)} statuses, {len(errors)} parser errors")
@@ -121,7 +138,8 @@ def main() -> int:
         for error in errors[:10]:
             print(f"  CAN_ERROR code={error.error_code} tick={error.timestamp_ticks}")
         if args.can_id is not None and not any(
-            frame.can_id == args.can_id and (expected_data is None or frame.payload == expected_data)
+            frame.crc_ok and frame.can_id == args.can_id and
+            (expected_data is None or frame.payload == expected_data)
             for frame in frames
         ):
             raise ValueError("expected CAN frame is absent")

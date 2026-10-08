@@ -41,13 +41,19 @@ try {
 
     Push-Location $work
     try {
-        $env:FPGA_CAN_TOP = $Top
-        $env:FPGA_CAN_BITRATE = [string]$CanBitrate
-        & (Join-Path $VivadoBin 'vivado.bat') -mode batch -source (Join-Path $work 'impl_eth1_udp.tcl') -nolog -nojournal 2>&1 |
-            Tee-Object -FilePath 'impl_console.log'
-        Remove-Item Env:FPGA_CAN_TOP
-        Remove-Item Env:FPGA_CAN_BITRATE
-        if ($LASTEXITCODE -ne 0) { throw 'Vivado ETH1 implementation failed' }
+        $previousTop = $env:FPGA_CAN_TOP
+        $previousBitrate = $env:FPGA_CAN_BITRATE
+        try {
+            $env:FPGA_CAN_TOP = $Top
+            $env:FPGA_CAN_BITRATE = [string]$CanBitrate
+            & (Join-Path $VivadoBin 'vivado.bat') -mode batch -source (Join-Path $work 'impl_eth1_udp.tcl') -nolog -nojournal 2>&1 |
+                Tee-Object -FilePath 'impl_console.log'
+            $vivadoExitCode = $LASTEXITCODE
+        } finally {
+            $env:FPGA_CAN_TOP = $previousTop
+            $env:FPGA_CAN_BITRATE = $previousBitrate
+        }
+        if ($vivadoExitCode -ne 0) { throw 'Vivado ETH1 implementation failed' }
         if (-not (Select-String -LiteralPath 'impl_console.log' -Pattern 'ETH1_UDP_IMPL_PASS' -Quiet)) {
             throw 'Vivado did not reach the completion marker'
         }

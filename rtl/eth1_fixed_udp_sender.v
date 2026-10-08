@@ -35,6 +35,14 @@ module eth1_fixed_udp_sender #(
     wire tx_ready;
     wire [7:0] tx_data;
     wire tx_last;
+    wire tx_rst_n;
+
+    // Link loss must abort both the frame builder and the MAC, including a
+    // frame already on GMII. Keep sequence/count outside this reset domain so
+    // the next probe cannot reuse the aborted frame's sequence number.
+    reset_sync u_tx_reset (
+        .clk(clk), .arst_n(rst_n && phy_ready), .srst_n(tx_rst_n)
+    );
 
     wire [7:0] payload_data =
         payload_index == 3'd0 ? 8'h46 : // F
@@ -51,8 +59,8 @@ module eth1_fixed_udp_sender #(
         .SRC_IP(SRC_IP), .DST_IP(DST_IP),
         .SRC_PORT(SRC_PORT), .DST_PORT(DST_PORT)
     ) u_frame_builder (
-        .clk(clk), .rst_n(rst_n),
-        .packet_valid(pending && phy_ready), .packet_ready(packet_ready),
+        .clk(clk), .rst_n(tx_rst_n),
+        .packet_valid(pending && tx_rst_n), .packet_ready(packet_ready),
         .packet_length(16'd8), .packet_sequence(next_sequence),
         .payload_valid(1'b1), .payload_ready(payload_ready),
         .payload_data(payload_data), .payload_last(payload_index == 3'd7),
@@ -63,7 +71,7 @@ module eth1_fixed_udp_sender #(
     );
 
     ethernet_mac_tx u_mac (
-        .clk(clk), .rst_n(rst_n),
+        .clk(clk), .rst_n(tx_rst_n),
         .frame_valid(frame_valid), .frame_ready(frame_ready),
         .frame_length(frame_length),
         .frame_data_valid(tx_valid), .frame_data_ready(tx_ready),
@@ -81,9 +89,10 @@ module eth1_fixed_udp_sender #(
             payload_index <= 3'd0;
             packet_count <= 32'd0;
         end else begin
-            if (!phy_ready) begin
+            if (!tx_rst_n) begin
                 interval_count <= 32'd0;
                 pending <= 1'b0;
+                payload_index <= 3'd0;
             end else if (pending && packet_ready) begin
                 pending <= 1'b0;
                 interval_count <= INTERVAL_CYCLES - 1;
@@ -97,7 +106,7 @@ module eth1_fixed_udp_sender #(
                 interval_count <= interval_count - 1'b1;
             end
 
-            if (payload_ready)
+            if (tx_rst_n && payload_ready)
                 payload_index <= payload_index + 1'b1;
         end
     end
